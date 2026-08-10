@@ -12,18 +12,17 @@ const ECONOMY_CONFIG = BotConfig.economy || {};
 const BASE_BANK_CAPACITY = ECONOMY_CONFIG.baseBankCapacity || 10000;
 const BANK_CAPACITY_PER_LEVEL = ECONOMY_CONFIG.bankCapacityPerLevel || 5000;
 
-// ===== Hạn mức cược/ngày (đã TĂNG so với trước) =====
-const MAX_DAILY_BET_PERCENT = ECONOMY_CONFIG.maxDailyBetPercent ?? 0.6; // 60% số dư ví
+// ===== Hạn mức cược/ngày =====
+const MAX_DAILY_BET_PERCENT = ECONOMY_CONFIG.maxDailyBetPercent ?? 0.6;
 const MIN_DAILY_BET_BUDGET = ECONOMY_CONFIG.minDailyBetBudget ?? 2000;
 const MAX_DAILY_BET_FLAT_CAP = ECONOMY_CONFIG.maxDailyBetFlatCap ?? 500000;
 const BET_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-// ===== Thuế lũy tiến khi cược vượt hạn mức (áp dụng trên TIỀN THẮNG) =====
-// Mốc tính theo tỉ lệ: (tổng đã cược trong ngày, TÍNH CẢ lượt cược hiện tại) / hạn mức ngày
+// ===== Thuế lũy tiến khi cược vượt hạn mức =====
 const BET_TAX_TIERS = [
-    { threshold: 2, rate: 0.35 },  // > 200% hạn mức -> thuế 35%
-    { threshold: 1.5, rate: 0.20 }, // > 150% hạn mức -> thuế 20%
-    { threshold: 1, rate: 0.10 },   // > 100% hạn mức -> thuế 10%
+    { threshold: 2, rate: 0.35 },
+    { threshold: 1.5, rate: 0.20 },
+    { threshold: 1, rate: 0.10 },
 ];
 
 function getBetTaxRate(usedRatio) {
@@ -36,26 +35,70 @@ function getBetTaxRate(usedRatio) {
 const WORK_MIN = ECONOMY_CONFIG.workMin || 10;
 const WORK_MAX = ECONOMY_CONFIG.workMax || 100;
 const COOLDOWNS = ECONOMY_CONFIG.cooldowns || {
-daily: 24 * 60 * 60 * 1000,
-work: 60 * 60 * 1000,
-crime: 2 * 60 * 60 * 1000,
-rob: 4 * 60 * 60 * 1000,
+    daily: 24 * 60 * 60 * 1000,
+    work: 60 * 60 * 1000,
+    crime: 2 * 60 * 60 * 1000,
+    rob: 4 * 60 * 60 * 1000,
 };
+
+// =====================================================================
+// LOCK CHỐNG DUPE TIỀN (in-memory mutex theo guildId:userId)
+// -----------------------------------------------------------------------
+// Vấn đề: nếu 2 lệnh cùng đọc-sửa-ghi dữ liệu ví của 1 người gần như đồng
+// thời (double-click, mạng lag rồi bấm lại...), cả 2 có thể đọc cùng bản
+// dữ liệu cũ rồi cùng ghi đè, khiến 1 trong 2 giao dịch "biến mất" hoặc
+// tệ hơn là bị cộng tiền 2 lần trong khi chỉ trừ tiền cược 1 lần.
+//
+// withEconomyLock(guildId, userIdOrIds, fn) đảm bảo mọi thao tác đọc-sửa-ghi
+// trên cùng 1 người dùng trong 1 guild được xếp hàng tuần tự, không chạy
+// song song. Hỗ trợ khóa nhiều user cùng lúc (vd rob.js cần khóa cả robber
+// lẫn victim) — luôn khóa theo thứ tự đã sort để tránh deadlock.
+// =====================================================================
+const economyLocks = new Map();
+
+function economyLockKey(guildId, userId) {
+    return `${guildId}:${userId}`;
+}
+
+function acquireEconomyLock(key) {
+    let releaseFn;
+    const newLock = new Promise((resolve) => { releaseFn = resolve; });
+    const previousLock = economyLocks.get(key) || Promise.resolve();
+    economyLocks.set(key, previousLock.then(() => newLock));
+    return previousLock.then(() => releaseFn);
+}
+
+export async function withEconomyLock(guildId, userIdOrIds, fn) {
+    const ids = Array.isArray(userIdOrIds) ? userIdOrIds : [userIdOrIds];
+    const keys = [...new Set(ids)].map((id) => economyLockKey(guildId, id)).sort();
+
+    const releaseFns = [];
+    for (const key of keys) {
+        const release = await acquireEconomyLock(key);
+        releaseFns.push(release);
+    }
+
+    try {
+        return await fn();
+    } finally {
+        for (const release of releaseFns) release();
+    }
+}
 
 export function getEconomyKey(guildId, userId) {
     const validGuildId = validateDiscordId(guildId, 'guildId');
     const validUserId = validateDiscordId(userId, 'userId');
-    
+
     if (!validGuildId || !validUserId) {
         throw new Error('Invalid guild ID or user ID');
     }
-    
+
     return getEconomyStorageKey(validGuildId, validUserId);
 }
 
 export function getMaxBankCapacity(userData) {
     if (!userData) return BASE_BANK_CAPACITY;
-    
+
     const bankLevel = userData.bankLevel || 0;
     let capacity = BASE_BANK_CAPACITY + (bankLevel * BANK_CAPACITY_PER_LEVEL);
 
@@ -68,7 +111,7 @@ export function getMaxBankCapacity(userData) {
 
     const bankNotes = inventory['bank_note'] || 0;
     capacity += (bankNotes * 10000);
-    
+
     return capacity;
 }
 
@@ -90,7 +133,7 @@ export async function getEconomyData(client, guildId, userId) {
             ...DEFAULT_ECONOMY_DATA,
             wallet: ECONOMY_CONFIG.startingBalance ?? DEFAULT_ECONOMY_DATA.wallet,
         };
-        
+
         return normalizeEconomyData(data, defaults);
     } catch (error) {
         logger.error(`Error getting economy data for user ${userId}`, error);
@@ -115,30 +158,32 @@ export async function setEconomyData(client, guildId, userId, data) {
 }
 
 export async function updateBalance(client, guildId, userId, options = {}) {
-    const data = await getEconomyData(client, guildId, userId);
-    
-    if (options.wallet !== undefined) {
-        data.wallet = Math.max(0, (data.wallet || 0) + options.wallet);
-    }
-    
-    if (options.bank !== undefined) {
-        const maxBank = getMaxBankCapacity(data);
-        data.bank = Math.min(Math.max(0, (data.bank || 0) + options.bank), maxBank);
-    }
-    
-    if (options.xp !== undefined) {
-        data.xp = Math.max(0, (data.xp || 0) + options.xp);
-        
-        const xpNeeded = Math.floor(5 * Math.pow(data.level || 1, 2) + 50 * (data.level || 1) + 100);
-        if (data.xp >= xpNeeded) {
-            data.xp -= xpNeeded;
-            data.level = (data.level || 1) + 1;
-            data.leveledUp = true;
+    return await withEconomyLock(guildId, userId, async () => {
+        const data = await getEconomyData(client, guildId, userId);
+
+        if (options.wallet !== undefined) {
+            data.wallet = Math.max(0, (data.wallet || 0) + options.wallet);
         }
-    }
-    
-    await setEconomyData(client, guildId, userId, data);
-    return data;
+
+        if (options.bank !== undefined) {
+            const maxBank = getMaxBankCapacity(data);
+            data.bank = Math.min(Math.max(0, (data.bank || 0) + options.bank), maxBank);
+        }
+
+        if (options.xp !== undefined) {
+            data.xp = Math.max(0, (data.xp || 0) + options.xp);
+
+            const xpNeeded = Math.floor(5 * Math.pow(data.level || 1, 2) + 50 * (data.level || 1) + 100);
+            if (data.xp >= xpNeeded) {
+                data.xp -= xpNeeded;
+                data.level = (data.level || 1) + 1;
+                data.leveledUp = true;
+            }
+        }
+
+        await setEconomyData(client, guildId, userId, data);
+        return data;
+    });
 }
 
 export function checkCooldown(userData, action) {
@@ -146,7 +191,7 @@ export function checkCooldown(userData, action) {
     const lastUsed = userData[`last${action.charAt(0).toUpperCase() + action.slice(1)}`] || 0;
     const now = Date.now();
     const remaining = Math.max(0, (lastUsed + cooldownTime) - now);
-    
+
     return {
         onCooldown: remaining > 0,
         remaining,
@@ -156,12 +201,12 @@ export function checkCooldown(userData, action) {
 
 export function formatCooldown(ms) {
     if (ms < 1000) return 'now';
-    
+
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
-    
+
     if (days > 0) return `${days}d ${hours % 24}h`;
     if (hours > 0) return `${hours}h ${minutes % 60}m`;
     if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
@@ -182,9 +227,9 @@ export function getWorkReward() {
         'worked as a delivery driver',
         'worked as a freelancer'
     ];
-    
+
     const job = jobs[Math.floor(Math.random() * jobs.length)];
-    
+
     return {
         amount,
         job,
@@ -194,72 +239,34 @@ export function getWorkReward() {
 
 export function getCrimeOutcome() {
     const outcomes = [
-        {
-            success: true,
-            amount: Math.floor(Math.random() * 200) + 50,
-            message: 'You successfully robbed a bank and got away with {amount}!' 
-        },
-        {
-            success: true,
-            amount: Math.floor(Math.random() * 100) + 20,
-            message: 'You pickpocketed someone and stole {amount}!' 
-        },
-        {
-            success: true,
-            amount: Math.floor(Math.random() * 150) + 30,
-            message: 'You hacked into a bank account and transferred {amount} to yourself!' 
-        },
-        {
-            success: false,
-            fine: Math.floor(Math.random() * 100) + 50,
-            message: 'You got caught and had to pay a fine of {fine}!' 
-        },
-        {
-            success: false,
-            fine: Math.floor(Math.random() * 150) + 50,
-            message: 'The police caught you! You paid {fine} to get out of jail.' 
-        },
-        {
-            success: false,
-            fine: 0,
-            message: 'Your attempt failed, but you managed to escape!' 
-        }
+        { success: true, amount: Math.floor(Math.random() * 200) + 50, message: 'You successfully robbed a bank and got away with {amount}!' },
+        { success: true, amount: Math.floor(Math.random() * 100) + 20, message: 'You pickpocketed someone and stole {amount}!' },
+        { success: true, amount: Math.floor(Math.random() * 150) + 30, message: 'You hacked into a bank account and transferred {amount} to yourself!' },
+        { success: false, fine: Math.floor(Math.random() * 100) + 50, message: 'You got caught and had to pay a fine of {fine}!' },
+        { success: false, fine: Math.floor(Math.random() * 150) + 50, message: 'The police caught you! You paid {fine} to get out of jail.' },
+        { success: false, fine: 0, message: 'Your attempt failed, but you managed to escape!' }
     ];
-    
+
     return outcomes[Math.floor(Math.random() * outcomes.length)];
 }
 
 export function getRobOutcome(targetBalance) {
     if (targetBalance <= 0) {
-        return {
-            success: false,
-            amount: 0,
-            message: 'The target has no money to steal!'
-        };
+        return { success: false, amount: 0, message: 'The target has no money to steal!' };
     }
-    
-const success = Math.random() > 0.4;
-    
+
+    const success = Math.random() > 0.4;
+
     if (success) {
         const amount = Math.min(
-Math.floor(Math.random() * (targetBalance * 0.3)) + 1,
+            Math.floor(Math.random() * (targetBalance * 0.3)) + 1,
             targetBalance
         );
-        
-        return {
-            success: true,
-            amount,
-            message: `You successfully robbed them and got away with {amount}!`
-        };
+
+        return { success: true, amount, message: `You successfully robbed them and got away with {amount}!` };
     } else {
         const fine = Math.floor(Math.random() * 200) + 100;
-        
-        return {
-            success: false,
-            amount: 0,
-            fine,
-            message: `You got caught! You had to pay a fine of {fine}.`
-        };
+        return { success: false, amount: 0, fine, message: `You got caught! You had to pay a fine of {fine}.` };
     }
 }
 
@@ -287,29 +294,32 @@ export const addMoney = wrapServiceBoundary(async function addMoney(client, guil
         );
     }
 
-    const userData = await getEconomyData(client, guildId, userId);
+    // Toàn bộ đọc-sửa-ghi nằm trong lock để tránh dupe khi gọi song song
+    return await withEconomyLock(guildId, userId, async () => {
+        const userData = await getEconomyData(client, guildId, userId);
 
-    if (type === 'bank') {
-        const maxBank = getMaxBankCapacity(userData);
-        if ((userData.bank || 0) + validAmount > maxBank) {
-            throw createError(
-                'Bank capacity exceeded',
-                ErrorTypes.VALIDATION,
-                `Bank capacity exceeded. Current: ${userData.bank || 0}, Max: ${maxBank}.`,
-                { guildId, userId, current: userData.bank || 0, max: maxBank, operation: 'addMoney' }
-            );
+        if (type === 'bank') {
+            const maxBank = getMaxBankCapacity(userData);
+            if ((userData.bank || 0) + validAmount > maxBank) {
+                throw createError(
+                    'Bank capacity exceeded',
+                    ErrorTypes.VALIDATION,
+                    `Bank capacity exceeded. Current: ${userData.bank || 0}, Max: ${maxBank}.`,
+                    { guildId, userId, current: userData.bank || 0, max: maxBank, operation: 'addMoney' }
+                );
+            }
+            userData.bank = (userData.bank || 0) + validAmount;
+        } else {
+            userData.wallet = (userData.wallet || 0) + validAmount;
         }
-        userData.bank = (userData.bank || 0) + validAmount;
-    } else {
-        userData.wallet = (userData.wallet || 0) + validAmount;
-    }
 
-    await setEconomyData(client, guildId, userId, userData);
+        await setEconomyData(client, guildId, userId, userData);
 
-    return {
-        newBalance: type === 'bank' ? userData.bank : userData.wallet,
-        ...(type === 'bank' ? { maxBank: getMaxBankCapacity(userData) } : {}),
-    };
+        return {
+            newBalance: type === 'bank' ? userData.bank : userData.wallet,
+            ...(type === 'bank' ? { maxBank: getMaxBankCapacity(userData) } : {}),
+        };
+    });
 }, {
     service: 'economy',
     operation: 'addMoney',
@@ -336,35 +346,37 @@ export const removeMoney = wrapServiceBoundary(async function removeMoney(client
         );
     }
 
-    const userData = await getEconomyData(client, guildId, userId);
+    return await withEconomyLock(guildId, userId, async () => {
+        const userData = await getEconomyData(client, guildId, userId);
 
-    if (type === 'bank') {
-        if ((userData.bank || 0) < validAmount) {
-            throw createError(
-                'Insufficient bank funds',
-                ErrorTypes.VALIDATION,
-                `Insufficient funds in bank. You have ${userData.bank || 0}, need ${validAmount}.`,
-                { guildId, userId, current: userData.bank || 0, required: validAmount, operation: 'removeMoney' }
-            );
+        if (type === 'bank') {
+            if ((userData.bank || 0) < validAmount) {
+                throw createError(
+                    'Insufficient bank funds',
+                    ErrorTypes.VALIDATION,
+                    `Insufficient funds in bank. You have ${userData.bank || 0}, need ${validAmount}.`,
+                    { guildId, userId, current: userData.bank || 0, required: validAmount, operation: 'removeMoney' }
+                );
+            }
+            userData.bank = (userData.bank || 0) - validAmount;
+        } else {
+            if ((userData.wallet || 0) < validAmount) {
+                throw createError(
+                    'Insufficient wallet funds',
+                    ErrorTypes.VALIDATION,
+                    `Insufficient funds in wallet. You have ${userData.wallet || 0}, need ${validAmount}.`,
+                    { guildId, userId, current: userData.wallet || 0, required: validAmount, operation: 'removeMoney' }
+                );
+            }
+            userData.wallet = (userData.wallet || 0) - validAmount;
         }
-        userData.bank = (userData.bank || 0) - validAmount;
-    } else {
-        if ((userData.wallet || 0) < validAmount) {
-            throw createError(
-                'Insufficient wallet funds',
-                ErrorTypes.VALIDATION,
-                `Insufficient funds in wallet. You have ${userData.wallet || 0}, need ${validAmount}.`,
-                { guildId, userId, current: userData.wallet || 0, required: validAmount, operation: 'removeMoney' }
-            );
-        }
-        userData.wallet = (userData.wallet || 0) - validAmount;
-    }
 
-    await setEconomyData(client, guildId, userId, userData);
+        await setEconomyData(client, guildId, userId, userData);
 
-    return {
-        newBalance: type === 'bank' ? userData.bank : userData.wallet,
-    };
+        return {
+            newBalance: type === 'bank' ? userData.bank : userData.wallet,
+        };
+    });
 }, {
     service: 'economy',
     operation: 'removeMoney',
@@ -373,56 +385,14 @@ export const removeMoney = wrapServiceBoundary(async function removeMoney(client
 
 export function getShopInventory() {
     return [
-        {
-            id: 'fishing_rod',
-            name: 'Fishing Rod',
-            emoji: '🎣',
-            price: 500,
-            description: 'Catch fish to sell for profit!',
-            type: 'tool'
-        },
-        {
-            id: 'hunting_rifle',
-            name: 'Hunting Rifle',
-            emoji: '🔫',
-            price: 1000,
-            description: 'Hunt animals for meat and fur!',
-            type: 'tool'
-        },
-        {
-            id: 'laptop',
-            name: 'Laptop',
-            emoji: '💻',
-            price: 2000,
-            description: 'Work as a programmer for higher pay!',
-            type: 'tool',
-            workMultiplier: 1.5
-        },
-        {
-            id: 'bank_loan',
-            name: 'Bank Loan',
-            emoji: '🏦',
-            price: 5000,
-            description: 'Increases your bank capacity by 50,000!',
-            type: 'upgrade',
-            effect: 'bank_capacity',
-            value: 50000
-        },
-        {
-            id: 'lottery_ticket',
-            name: 'Lottery Ticket',
-            emoji: '🎫',
-            price: 100,
-            description: 'A chance to win big!',
-            type: 'consumable',
-            use: 'gamble'
-        }
+        { id: 'fishing_rod', name: 'Fishing Rod', emoji: '🎣', price: 500, description: 'Catch fish to sell for profit!', type: 'tool' },
+        { id: 'hunting_rifle', name: 'Hunting Rifle', emoji: '🔫', price: 1000, description: 'Hunt animals for meat and fur!', type: 'tool' },
+        { id: 'laptop', name: 'Laptop', emoji: '💻', price: 2000, description: 'Work as a programmer for higher pay!', type: 'tool', workMultiplier: 1.5 },
+        { id: 'bank_loan', name: 'Bank Loan', emoji: '🏦', price: 5000, description: 'Increases your bank capacity by 50,000!', type: 'upgrade', effect: 'bank_capacity', value: 50000 },
+        { id: 'lottery_ticket', name: 'Lottery Ticket', emoji: '🎫', price: 100, description: 'A chance to win big!', type: 'consumable', use: 'gamble' }
     ];
 }
 
-/**
- * Tính trạng thái hạn mức cược hôm nay mà KHÔNG lưu DB — dùng để hiển thị (vd trong /balance).
- */
 export function computeDailyBetStatus(userData) {
     const now = Date.now();
     const needsReset = !userData.dailyBetResetAt || now - userData.dailyBetResetAt >= BET_LIMIT_WINDOW_MS;
@@ -442,21 +412,9 @@ export function computeDailyBetStatus(userData) {
     const resetsInMs = Math.max(0, BET_LIMIT_WINDOW_MS - (now - userData.dailyBetResetAt));
     const usedRatio = budget > 0 ? used / budget : 0;
 
-    return {
-        budget,
-        used,
-        remaining,
-        resetsInMs,
-        taxRate: getBetTaxRate(usedRatio)
-    };
+    return { budget, used, remaining, resetsInMs, taxRate: getBetTaxRate(usedRatio) };
 }
 
-/**
- * Ghi nhận 1 lượt cược vào hạn mức ngày và trả về mức THUẾ áp dụng cho tiền thắng của lượt này.
- * KHÔNG còn chặn cứng — người chơi luôn được cược, chỉ bị đánh thuế lũy tiến trên tiền thắng
- * nếu tổng cược trong ngày (tính cả lượt này) vượt hạn mức.
- * Gọi hàm này trước khi cộng/trừ tiền cược thật; áp `taxRate` trả về vào phần THẮNG (payout - betAmount).
- */
 export const recordBetAndGetTaxRate = wrapServiceBoundary(async function recordBetAndGetTaxRate(client, guildId, userId, betAmount) {
     const validAmount = validateNumber(betAmount, 'betAmount');
     if (validAmount === null || validAmount <= 0) {
@@ -468,32 +426,34 @@ export const recordBetAndGetTaxRate = wrapServiceBoundary(async function recordB
         );
     }
 
-    const userData = await getEconomyData(client, guildId, userId);
-    const now = Date.now();
-    const needsReset = !userData.dailyBetResetAt || now - userData.dailyBetResetAt >= BET_LIMIT_WINDOW_MS;
+    return await withEconomyLock(guildId, userId, async () => {
+        const userData = await getEconomyData(client, guildId, userId);
+        const now = Date.now();
+        const needsReset = !userData.dailyBetResetAt || now - userData.dailyBetResetAt >= BET_LIMIT_WINDOW_MS;
 
-    if (needsReset) {
-        const wallet = userData.wallet || 0;
-        userData.dailyBetBudget = Math.min(
-            Math.max(Math.floor(wallet * MAX_DAILY_BET_PERCENT), MIN_DAILY_BET_BUDGET),
-            MAX_DAILY_BET_FLAT_CAP
-        );
-        userData.dailyBetTotal = 0;
-        userData.dailyBetResetAt = now;
-    }
+        if (needsReset) {
+            const wallet = userData.wallet || 0;
+            userData.dailyBetBudget = Math.min(
+                Math.max(Math.floor(wallet * MAX_DAILY_BET_PERCENT), MIN_DAILY_BET_BUDGET),
+                MAX_DAILY_BET_FLAT_CAP
+            );
+            userData.dailyBetTotal = 0;
+            userData.dailyBetResetAt = now;
+        }
 
-    userData.dailyBetTotal = (userData.dailyBetTotal || 0) + validAmount;
-    await setEconomyData(client, guildId, userId, userData);
+        userData.dailyBetTotal = (userData.dailyBetTotal || 0) + validAmount;
+        await setEconomyData(client, guildId, userId, userData);
 
-    const usedRatio = userData.dailyBetBudget > 0 ? userData.dailyBetTotal / userData.dailyBetBudget : 0;
-    const taxRate = getBetTaxRate(usedRatio);
+        const usedRatio = userData.dailyBetBudget > 0 ? userData.dailyBetTotal / userData.dailyBetBudget : 0;
+        const taxRate = getBetTaxRate(usedRatio);
 
-    return {
-        budget: userData.dailyBetBudget,
-        used: userData.dailyBetTotal,
-        remaining: Math.max(0, userData.dailyBetBudget - userData.dailyBetTotal),
-        taxRate
-    };
+        return {
+            budget: userData.dailyBetBudget,
+            used: userData.dailyBetTotal,
+            remaining: Math.max(0, userData.dailyBetBudget - userData.dailyBetTotal),
+            taxRate
+        };
+    });
 }, {
     service: 'economy',
     operation: 'recordBetAndGetTaxRate',
