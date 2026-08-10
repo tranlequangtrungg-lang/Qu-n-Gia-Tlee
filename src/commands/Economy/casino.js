@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
 import { successEmbed, errorEmbed } from '../../utils/embeds.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { logger } from '../../utils/logger.js';
@@ -10,14 +10,16 @@ import {
     formatCurrency,
     formatCooldown
 } from '../../utils/economy.js';
+import { renderTaiXiuImage, renderXocDiaImage } from '../../utils/casinoRender.js';
+import { getCasinoHistory, recordCasinoResult } from '../../utils/casinoStats.js';
 
-const CASINO_BET_COOLDOWN = 3 * 1000; // Riêng biệt với /gamble (lastGamble) để không đụng cooldown.
+const CASINO_BET_COOLDOWN = 3 * 1000;
 const MIN_BET = 10;
 const MAX_BET = 1000000;
 
 // ===================== TÀI XỈU =====================
-const TAI_XIU_RETURN_MULTIPLIER = 2;  // Thắng Tài/Xỉu: nhận lại gấp đôi (lãi = 1x).
-const BAO_RETURN_MULTIPLIER = 4;      // Thắng Bão: nhận lại gấp 4 (lãi = 3x).
+const TAI_XIU_RETURN_MULTIPLIER = 2;
+const BAO_RETURN_MULTIPLIER = 4;
 
 function rollOne() {
     return Math.floor(Math.random() * 6) + 1;
@@ -33,26 +35,18 @@ function evaluateTaiXiu() {
 }
 
 // ===================== XÓC ĐĨA =====================
-// 4 đồng xu, mỗi đồng 50/50 Đỏ/Trắng. Đếm số mặt Đỏ (0-4).
-// Multiplier cho cửa "đoán đúng số lượng" phản ánh độ hiếm (xác suất C(4,k)/16).
-const XOCDIA_EXACT_MULTIPLIER = {
-    0: 8,   // 1/16
-    1: 3,   // 4/16
-    2: 2.5, // 6/16
-    3: 3,   // 4/16
-    4: 8,   // 1/16
-};
-const XOCDIA_PARITY_MULTIPLIER = 2; // Chẵn/Lẻ luôn đúng 50/50.
+const XOCDIA_EXACT_MULTIPLIER = { 0: 8, 1: 3, 2: 2.5, 3: 3, 4: 8 };
+const XOCDIA_PARITY_MULTIPLIER = 2;
 
 function rollXocDia() {
     let redCount = 0;
-    const coins = [];
+    const coinsIsRed = [];
     for (let i = 0; i < 4; i++) {
         const isRed = Math.random() < 0.5;
-        coins.push(isRed ? '🔴' : '⚪');
+        coinsIsRed.push(isRed);
         if (isRed) redCount++;
     }
-    return { coins, redCount };
+    return { coinsIsRed, redCount };
 }
 
 // ===================== HÀM DÙNG CHUNG =====================
@@ -102,14 +96,34 @@ async function handleTaiXiu(interaction, client) {
     freshData.lastCasinoBet = now;
     await setEconomyData(client, guildId, userId, freshData);
 
-    const diceDisplay = result.dice.map(d => `🎲${d}`).join(' ');
-    const outcomeLabel = { tai: 'TÀI', xiu: 'XỈU', bao: 'BÃO' }[result.outcome];
+    const history = await recordCasinoResult(client, guildId, 'taixiu', {
+        outcome: result.outcome,
+        timestamp: now,
+    });
 
-    const embed = won
-        ? successEmbed('🎉 Bạn thắng!', `${diceDisplay}\nTổng: **${result.total}** → **${outcomeLabel}**\n\nBạn nhận về **${formatCurrency(payout)}** (lãi ${formatCurrency(payout - betAmount)}).`)
-        : errorEmbed('😢 Bạn thua!', `${diceDisplay}\nTổng: **${result.total}** → **${outcomeLabel}**\n\nBạn mất **${formatCurrency(betAmount)}**.`);
+    const betLabel = { tai: 'Tài', xiu: 'Xỉu', bao: 'Bão' }[betType];
 
-    await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+    const imageBuffer = await renderTaiXiuImage({
+        dice: result.dice,
+        total: result.total,
+        outcome: result.outcome,
+        betLabel,
+        betAmount,
+        won,
+        payout,
+        history,
+    });
+
+    const attachment = new AttachmentBuilder(imageBuffer, { name: 'taixiu.png' });
+
+    const embed = (won
+        ? successEmbed('🎉 Bạn thắng!', `${betLabel} • Cược ${formatCurrency(betAmount)}`)
+        : errorEmbed('😢 Bạn thua!', `${betLabel} • Cược ${formatCurrency(betAmount)}`)
+    )
+        .setImage('attachment://taixiu.png')
+        .setFooter({ text: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}` });
+
+    await InteractionHelper.safeEditReply(interaction, { embeds: [embed], files: [attachment] });
 
     logger.info('[CASINO] Tai Xiu round played', {
         userId, guildId, betType, betAmount, outcome: result.outcome, won, payout
@@ -119,7 +133,7 @@ async function handleTaiXiu(interaction, client) {
 async function handleXocDia(interaction, client) {
     const userId = interaction.user.id;
     const guildId = interaction.guildId;
-    const betChoice = interaction.options.getString('cuoc'); // 'chan' | 'le' | '0'..'4'
+    const betChoice = interaction.options.getString('cuoc');
     const betAmount = interaction.options.getInteger('sotien');
 
     const userData = await getEconomyData(client, guildId, userId);
@@ -159,23 +173,36 @@ async function handleXocDia(interaction, client) {
     freshData.lastCasinoBet = now;
     await setEconomyData(client, guildId, userId, freshData);
 
-    const coinsDisplay = result.coins.join(' ');
-    const parityLabel = result.redCount % 2 === 0 ? 'CHẴN' : 'LẺ';
+    const parity = result.redCount % 2 === 0 ? 'chan' : 'le';
+    const history = await recordCasinoResult(client, guildId, 'xocdia', {
+        outcome: parity,
+        timestamp: now,
+    });
+
     const betLabel = isParityBet
         ? (betChoice === 'chan' ? 'Chẵn' : 'Lẻ')
         : `${betChoice} Đỏ`;
 
-    const embed = won
-        ? successEmbed(
-            '🎉 Bạn thắng!',
-            `${coinsDisplay}\nSố Đỏ: **${result.redCount}** (${parityLabel})\nBạn cược: **${betLabel}**\n\nBạn nhận về **${formatCurrency(payout)}** (lãi ${formatCurrency(payout - betAmount)}).`
-        )
-        : errorEmbed(
-            '😢 Bạn thua!',
-            `${coinsDisplay}\nSố Đỏ: **${result.redCount}** (${parityLabel})\nBạn cược: **${betLabel}**\n\nBạn mất **${formatCurrency(betAmount)}**.`
-        );
+    const imageBuffer = await renderXocDiaImage({
+        coins: result.coinsIsRed,
+        redCount: result.redCount,
+        betLabel,
+        betAmount,
+        won,
+        payout,
+        history,
+    });
 
-    await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+    const attachment = new AttachmentBuilder(imageBuffer, { name: 'xocdia.png' });
+
+    const embed = (won
+        ? successEmbed('🎉 Bạn thắng!', `${betLabel} • Cược ${formatCurrency(betAmount)}`)
+        : errorEmbed('😢 Bạn thua!', `${betLabel} • Cược ${formatCurrency(betAmount)}`)
+    )
+        .setImage('attachment://xocdia.png')
+        .setFooter({ text: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}` });
+
+    await InteractionHelper.safeEditReply(interaction, { embeds: [embed], files: [attachment] });
 
     logger.info('[CASINO] Xoc Dia round played', {
         userId, guildId, betChoice, betAmount, redCount: result.redCount, won, payout
