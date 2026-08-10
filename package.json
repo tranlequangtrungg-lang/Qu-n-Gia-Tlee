@@ -15,7 +15,7 @@
     "restore:db": "node scripts/restore.js",
     "backup:drill": "node scripts/restore-drill.js"
   },
-"dependencies": {
+  "dependencies": {
     "@discordjs/rest": "^2.6.1",
     "@napi-rs/canvas": "^1.0.3",
     "axios": "^1.15.2",
