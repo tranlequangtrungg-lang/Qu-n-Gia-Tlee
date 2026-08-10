@@ -3,6 +3,7 @@ import { shopItems } from '../../../config/shop/items.js';
 import { getColor } from '../../../config/bot.js';
 import { logger } from '../../../utils/logger.js';
 import { handleInteractionError } from '../../../utils/errorHandler.js';
+import { formatCurrency } from '../../../utils/economy.js';
 
 export default {
     async execute(interaction, config, client) {
@@ -22,7 +23,7 @@ export default {
                 pageItems.forEach(item => {
                     embed.addFields({
                         name: `${item.name} (${item.id})`,
-                        value: `**Type:** ${item.type}\n **Price:** $${item.price.toLocaleString()}\n${item.description}`,
+                        value: `**Type:** ${item.type}\n **Price:** ${formatCurrency(item.price)}\n${item.description}`,
                         inline: false,
                     });
                 });
