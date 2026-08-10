@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { getEconomyData, setEconomyData } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, formatCurrency } from '../../utils/economy.js';
 import { getGuildConfig } from '../../services/config/guildConfig.js';
 import { formatDuration } from '../../utils/embeds.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
@@ -66,7 +66,7 @@ export default {
                     DAILY_AMOUNT * PREMIUM_BONUS_PERCENTAGE,
                 );
                 earned += bonusAmount;
-                bonusMessage = `\n✨ **Premium Bonus:** +$${bonusAmount.toLocaleString()}`;
+                bonusMessage = `\n✨ **Premium Bonus:** +${formatCurrency(bonusAmount)}`;
                 hasPremiumRole = true;
             }
 
@@ -86,11 +86,11 @@ export default {
 
             const embed = successEmbed(
                 "✅ Daily Claimed!",
-                `You have claimed your daily **$${earned.toLocaleString()}**!${bonusMessage}`
+                `You have claimed your daily **${formatCurrency(earned)}**!${bonusMessage}`
             )
                 .addFields({
                     name: "New Cash Balance",
-                    value: `$${userData.wallet.toLocaleString()}`,
+                    value: formatCurrency(userData.wallet),
                     inline: true,
                 })
                 .setFooter({
