@@ -1,7 +1,7 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
-import { getEconomyData, getMaxBankCapacity, computeDailyBetStatus, formatCooldown } from '../../utils/economy.js';
+import { getEconomyData, getMaxBankCapacity, computeDailyBetStatus, formatCooldown, formatCurrency } from '../../utils/economy.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 export default {
@@ -49,24 +49,24 @@ export default {
                 .addFields(
                     {
                         name: "💵 Cash",
-                        value: `$${wallet.toLocaleString()}`,
+                        value: formatCurrency(wallet),
                         inline: true,
                     },
                     {
                         name: "🏦 Bank",
-                        value: `$${bank.toLocaleString()} / $${maxBank.toLocaleString()}`,
+                        value: `${formatCurrency(bank)} / ${formatCurrency(maxBank)}`,
                         inline: true,
                     },
                     {
                         name: "💰 Total",
-                        value: `$${(wallet + bank).toLocaleString()}`,
+                        value: formatCurrency(wallet + bank),
                         inline: true,
                     },
                     {
                         name: "🎲 Hạn mức cược hôm nay",
                         value: (() => {
                             const bet = computeDailyBetStatus(userData);
-                            return `$${bet.remaining.toLocaleString()} / $${bet.budget.toLocaleString()}`;
+                            return `${formatCurrency(bet.remaining)} / ${formatCurrency(bet.budget)}`;
                         })(),
                         inline: true,
                     }
