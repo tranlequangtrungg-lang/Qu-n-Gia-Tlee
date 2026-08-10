@@ -199,6 +199,16 @@ export const botConfig = {
     // Jail time after failed rob (milliseconds).
     // 3600000 = 1 hour.
     robFailJailTime: 3600000,
+
+    // =========================
+    // DAILY BETTING LIMIT (giới hạn cược/ngày)
+    // =========================
+    // % tối đa của ví được phép cược trong 1 ngày (chốt tại thời điểm reset, không dao động theo thắng/thua giữa ngày).
+    maxDailyBetPercent: 0.3,
+    // Sàn tối thiểu (coins) để user mới/ít tiền vẫn chơi được chút ít dù ví nhỏ.
+    minDailyBetBudget: 500,
+    // Trần tuyệt đối (coins), phòng trường hợp ví quá lớn thì % vẫn ra số khủng.
+    maxDailyBetFlatCap: 100000,
   },
 
   // =========================
