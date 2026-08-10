@@ -18,13 +18,41 @@ const MAX_BET = 1000000;
 const TAI_XIU_RETURN_MULTIPLIER = 2;
 const BAO_RETURN_MULTIPLIER = 4;
 
-const DICE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-const COIN_FACES = ['🔴', '⚪'];
 const ANIMATION_FRAMES = 4;
 const ANIMATION_DELAY_MS = 500;
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ===================== VẼ XÚC XẮC BẰNG LƯỚI EMOJI (to, rõ) =====================
+const PIP_GRID = {
+    1: [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
+    2: [[1, 0, 0], [0, 0, 0], [0, 0, 1]],
+    3: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    4: [[1, 0, 1], [0, 0, 0], [1, 0, 1]],
+    5: [[1, 0, 1], [0, 1, 0], [1, 0, 1]],
+    6: [[1, 0, 1], [1, 0, 1], [1, 0, 1]],
+};
+const PIP_ON = '🔴';
+const PIP_OFF = '⬜';
+const DICE_GAP = '　'; // khoảng trắng full-width, cách đều giữa các viên xúc xắc
+
+function dieLines(value) {
+    return PIP_GRID[value].map(row => row.map(cell => (cell ? PIP_ON : PIP_OFF)).join(''));
+}
+
+function renderDiceBlock(diceValues) {
+    const allLines = diceValues.map(dieLines);
+    const lines = [];
+    for (let row = 0; row < 3; row++) {
+        lines.push(allLines.map(dieRows => dieRows[row]).join(DICE_GAP));
+    }
+    return lines.join('\n');
+}
+
+function randomDiceValues(count) {
+    return Array.from({ length: count }, () => Math.floor(Math.random() * 6) + 1);
 }
 
 function rollOne() {
@@ -40,8 +68,12 @@ function evaluateTaiXiu() {
     return { dice, total, outcome };
 }
 
+// ===================== XÓC ĐĨA =====================
 const XOCDIA_EXACT_MULTIPLIER = { 0: 8, 1: 3, 2: 2.5, 3: 3, 4: 8 };
 const XOCDIA_PARITY_MULTIPLIER = 2;
+const COIN_RED = '🔴';
+const COIN_WHITE = '⚪';
+const COIN_HIDDEN = '❓';
 
 function rollXocDia() {
     let redCount = 0;
@@ -52,6 +84,10 @@ function rollXocDia() {
         if (isRed) redCount++;
     }
     return { coinsIsRed, redCount };
+}
+
+function renderCoinsRow(coinsIsRed) {
+    return coinsIsRed.map(r => (r ? COIN_RED : COIN_WHITE)).join('   ');
 }
 
 async function checkCasinoCooldown(userData, userId, guildId) {
@@ -69,22 +105,7 @@ async function checkCasinoCooldown(userData, userId, guildId) {
     return now;
 }
 
-async function playRollingAnimation(interaction, { title, frameCount, betLabel, betAmount }) {
-    for (let i = 0; i < ANIMATION_FRAMES; i++) {
-        const randomFaces = Array.from({ length: frameCount }, () =>
-            DICE_FACES[Math.floor(Math.random() * DICE_FACES.length)]
-        ).join(' ');
-
-        const embed = infoEmbed(
-            title,
-            `${randomFaces}\n\n${betLabel} • Cược ${formatCurrency(betAmount)}\n_Đang lắc..._`
-        );
-
-        await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
-        await sleep(ANIMATION_DELAY_MS);
-    }
-}
-
+// ===================== TÀI XỈU =====================
 async function handleTaiXiu(interaction, client) {
     const userId = interaction.user.id;
     const guildId = interaction.guildId;
@@ -107,12 +128,23 @@ async function handleTaiXiu(interaction, client) {
 
     const betLabel = { tai: 'Tài', xiu: 'Xỉu', bao: 'Bão' }[betType];
 
-    await playRollingAnimation(interaction, {
-        title: '🎲 Tài Xỉu',
-        frameCount: 3,
-        betLabel,
-        betAmount
-    });
+    // Bát úp - lắc
+    const coveredEmbed = infoEmbed(
+        '🥣 Úp bát... lắc xúc xắc!',
+        `${betLabel} • Cược ${formatCurrency(betAmount)}\n\n_Đang lắc trong bát..._`
+    );
+    await InteractionHelper.safeEditReply(interaction, { embeds: [coveredEmbed] });
+    await sleep(ANIMATION_DELAY_MS);
+
+    for (let i = 0; i < ANIMATION_FRAMES; i++) {
+        const previewDice = randomDiceValues(3);
+        const embed = infoEmbed(
+            '🎲 Đang lắc...',
+            `${renderDiceBlock(previewDice)}\n\n${betLabel} • Cược ${formatCurrency(betAmount)}`
+        );
+        await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+        await sleep(ANIMATION_DELAY_MS);
+    }
 
     const result = evaluateTaiXiu();
     const won = result.outcome === betType;
@@ -124,12 +156,12 @@ async function handleTaiXiu(interaction, client) {
     freshData.lastCasinoBet = now;
     await setEconomyData(client, guildId, userId, freshData);
 
-    const diceDisplay = result.dice.map(v => DICE_FACES[v - 1]).join(' ');
+    const diceBlock = renderDiceBlock(result.dice);
     const resultLabel = { tai: 'TÀI', xiu: 'XỈU', bao: 'BÃO' }[result.outcome];
 
     const embed = (won
-        ? successEmbed('🎉 Bạn thắng!', `${diceDisplay}\nTổng: **${result.total}** → **${resultLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(payout - betAmount)}`)
-        : errorEmbed('😢 Bạn thua!', `${diceDisplay}\nTổng: **${result.total}** → **${resultLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thua -${formatCurrency(betAmount)}`)
+        ? successEmbed('🥣 Mở bát! Bạn thắng! 🎉', `${diceBlock}\n\nTổng: **${result.total}** → **${resultLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(payout - betAmount)}`)
+        : errorEmbed('🥣 Mở bát! Bạn thua! 😢', `${diceBlock}\n\nTổng: **${result.total}** → **${resultLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thua -${formatCurrency(betAmount)}`)
     ).setFooter({ text: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}` });
 
     await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
@@ -139,6 +171,7 @@ async function handleTaiXiu(interaction, client) {
     });
 }
 
+// ===================== XÓC ĐĨA =====================
 async function handleXocDia(interaction, client) {
     const userId = interaction.user.id;
     const guildId = interaction.guildId;
@@ -164,16 +197,20 @@ async function handleXocDia(interaction, client) {
         ? (betChoice === 'chan' ? 'Chẵn' : 'Lẻ')
         : `${betChoice} Đỏ`;
 
+    // Úp đĩa
+    const coveredEmbed = infoEmbed(
+        '🥣 Úp đĩa... xóc!',
+        `${Array(4).fill(COIN_HIDDEN).join('   ')}\n\n${betLabel} • Cược ${formatCurrency(betAmount)}\n\n_Đang xóc..._`
+    );
+    await InteractionHelper.safeEditReply(interaction, { embeds: [coveredEmbed] });
+    await sleep(ANIMATION_DELAY_MS);
+
     for (let i = 0; i < ANIMATION_FRAMES; i++) {
-        const randomFaces = Array.from({ length: 4 }, () =>
-            COIN_FACES[Math.floor(Math.random() * COIN_FACES.length)]
-        ).join(' ');
-
+        const previewCoins = Array.from({ length: 4 }, () => Math.random() < 0.5);
         const embed = infoEmbed(
-            '🪙 Xóc Đĩa',
-            `${randomFaces}\n\n${betLabel} • Cược ${formatCurrency(betAmount)}\n_Đang xóc đĩa..._`
+            '🪙 Đang xóc...',
+            `${renderCoinsRow(previewCoins)}\n\n${betLabel} • Cược ${formatCurrency(betAmount)}`
         );
-
         await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
         await sleep(ANIMATION_DELAY_MS);
     }
@@ -200,12 +237,12 @@ async function handleXocDia(interaction, client) {
     freshData.lastCasinoBet = now;
     await setEconomyData(client, guildId, userId, freshData);
 
-    const coinsDisplay = result.coinsIsRed.map(r => (r ? '🔴' : '⚪')).join(' ');
+    const coinsDisplay = renderCoinsRow(result.coinsIsRed);
     const parityLabel = result.redCount % 2 === 0 ? 'CHẴN' : 'LẺ';
 
     const embed = (won
-        ? successEmbed('🎉 Bạn thắng!', `${coinsDisplay}\n**${result.redCount} Đỏ** → **${parityLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(payout - betAmount)}`)
-        : errorEmbed('😢 Bạn thua!', `${coinsDisplay}\n**${result.redCount} Đỏ** → **${parityLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thua -${formatCurrency(betAmount)}`)
+        ? successEmbed('🥣 Mở đĩa! Bạn thắng! 🎉', `${coinsDisplay}\n\n**${result.redCount} Đỏ** → **${parityLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(payout - betAmount)}`)
+        : errorEmbed('🥣 Mở đĩa! Bạn thua! 😢', `${coinsDisplay}\n\n**${result.redCount} Đỏ** → **${parityLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thua -${formatCurrency(betAmount)}`)
     ).setFooter({ text: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}` });
 
     await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
