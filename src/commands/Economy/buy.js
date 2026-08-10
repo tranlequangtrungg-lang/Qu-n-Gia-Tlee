@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, MessageFlags } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
 import { shopItems } from '../../config/shop/items.js';
-import { getEconomyData, setEconomyData } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, formatCurrency } from '../../utils/economy.js';
 import { getGuildConfig } from '../../services/config/guildConfig.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
@@ -67,7 +67,7 @@ export default {
                 throw createError(
                     "Insufficient funds",
                     ErrorTypes.VALIDATION,
-                    `You need **$${totalCost.toLocaleString()}** to purchase ${quantity}x **${item.name}**, but you only have **$${userData.wallet.toLocaleString()}** in cash.`,
+                    `You need **${formatCurrency(totalCost)}** to purchase ${quantity}x **${item.name}**, but you only have **${formatCurrency(userData.wallet)}** in cash.`,
                     { required: totalCost, current: userData.wallet, itemId, quantity }
                 );
             }
@@ -101,7 +101,7 @@ export default {
 
             userData.wallet -= totalCost;
 
-            let successDescription = `You successfully purchased ${quantity}x **${item.name}** for **$${totalCost.toLocaleString()}**!`;
+            let successDescription = `You successfully purchased ${quantity}x **${item.name}** for **${formatCurrency(totalCost)}**!`;
 
             if (item.type === "role" && itemId === "premium_role") {
                 const member = interaction.member;
@@ -151,7 +151,7 @@ export default {
                 successDescription,
             ).addFields({
                 name: "New Balance",
-                value: `$${userData.wallet.toLocaleString()}`,
+                value: formatCurrency(userData.wallet),
                 inline: true,
             });
 
