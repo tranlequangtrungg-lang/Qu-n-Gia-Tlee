@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, MessageFlags } from 'discord.js';
 import { successEmbed, buildUserErrorEmbed } from '../../utils/embeds.js';
-import { getEconomyData, setEconomyData, getMaxBankCapacity } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, getMaxBankCapacity, formatCurrency } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 
@@ -67,7 +67,7 @@ export default {
                     embeds: [
                         buildUserErrorEmbed(
                             'validation',
-                            `You tried to deposit more than you have. Depositing your remaining cash: **$${depositAmount.toLocaleString()}**`
+                            `You tried to deposit more than you have. Depositing your remaining cash: **${formatCurrency(depositAmount)}**`
                         )
                     ],
                     flags: MessageFlags.Ephemeral,
@@ -80,7 +80,7 @@ export default {
                 throw createError(
                     "Bank is full",
                     ErrorTypes.VALIDATION,
-                    `Your bank is currently full (Max Capacity: $${maxBank.toLocaleString()}). Purchase a **Bank Upgrade** to increase your limit.`,
+                    `Your bank is currently full (Max Capacity: ${formatCurrency(maxBank)}). Purchase a **Bank Upgrade** to increase your limit.`,
                     { maxBank, currentBank: userData.bank, userId }
                 );
             }
@@ -94,7 +94,7 @@ export default {
                         embeds: [
                             buildUserErrorEmbed(
                                 'validation',
-                                `You only had space for **$${depositAmount.toLocaleString()}** in your bank account (Max: $${maxBank.toLocaleString()}). The rest remains in your cash.`
+                                `You only had space for **${formatCurrency(depositAmount)}** in your bank account (Max: ${formatCurrency(maxBank)}). The rest remains in your cash.`
                             )
                         ],
                         flags: MessageFlags.Ephemeral,
@@ -118,17 +118,17 @@ export default {
 
             const embed = successEmbed(
                 'Deposit Successful',
-                `You successfully deposited **$${depositAmount.toLocaleString()}** into your bank.`
+                `You successfully deposited **${formatCurrency(depositAmount)}** into your bank.`
             )
                 .addFields(
                     {
                         name: "New Cash Balance",
-                        value: `$${userData.wallet.toLocaleString()}`,
+                        value: formatCurrency(userData.wallet),
                         inline: true,
                     },
                     {
                         name: "New Bank Balance",
-                        value: `$${userData.bank.toLocaleString()} / $${maxBank.toLocaleString()}`,
+                        value: `${formatCurrency(userData.bank)} / ${formatCurrency(maxBank)}`,
                         inline: true,
                     },
                 );
