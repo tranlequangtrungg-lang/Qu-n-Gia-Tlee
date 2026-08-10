@@ -6,7 +6,7 @@ import { InteractionHelper } from '../../utils/interactionHelper.js';
 import {
     getEconomyData,
     setEconomyData,
-    checkAndConsumeBetLimit,
+    recordBetAndGetTaxRate,
     formatCurrency,
     formatCooldown
 } from '../../utils/economy.js';
@@ -105,6 +105,11 @@ async function checkCasinoCooldown(userData, userId, guildId) {
     return now;
 }
 
+function taxNote(taxRate) {
+    if (!taxRate) return '';
+    return `\n💸 _Đã vượt hạn mức cược ngày → thuế **${Math.round(taxRate * 100)}%** trên tiền thắng._`;
+}
+
 // ===================== TÀI XỈU =====================
 async function handleTaiXiu(interaction, client) {
     const userId = interaction.user.id;
@@ -124,7 +129,7 @@ async function handleTaiXiu(interaction, client) {
         );
     }
 
-    await checkAndConsumeBetLimit(client, guildId, userId, betAmount);
+    const { taxRate } = await recordBetAndGetTaxRate(client, guildId, userId, betAmount);
 
     const betLabel = { tai: 'Tài', xiu: 'Xỉu', bao: 'Bão' }[betType];
 
@@ -149,10 +154,13 @@ async function handleTaiXiu(interaction, client) {
     const result = evaluateTaiXiu();
     const won = result.outcome === betType;
     const multiplier = betType === 'bao' ? BAO_RETURN_MULTIPLIER : TAI_XIU_RETURN_MULTIPLIER;
-    const payout = won ? betAmount * multiplier : 0;
+    const grossPayout = won ? betAmount * multiplier : 0;
+    const grossProfit = won ? grossPayout - betAmount : 0;
+    const taxAmount = won ? Math.floor(grossProfit * taxRate) : 0;
+    const netPayout = won ? grossPayout - taxAmount : 0;
 
     const freshData = await getEconomyData(client, guildId, userId);
-    freshData.wallet = Math.max(0, (freshData.wallet || 0) - betAmount + payout);
+    freshData.wallet = Math.max(0, (freshData.wallet || 0) - betAmount + netPayout);
     freshData.lastCasinoBet = now;
     await setEconomyData(client, guildId, userId, freshData);
 
@@ -160,14 +168,14 @@ async function handleTaiXiu(interaction, client) {
     const resultLabel = { tai: 'TÀI', xiu: 'XỈU', bao: 'BÃO' }[result.outcome];
 
     const embed = (won
-        ? successEmbed('🥣 Mở bát! Bạn thắng! 🎉', `${diceBlock}\n\nTổng: **${result.total}** → **${resultLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(payout - betAmount)}`)
+        ? successEmbed('🥣 Mở bát! Bạn thắng! 🎉', `${diceBlock}\n\nTổng: **${result.total}** → **${resultLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(netPayout - betAmount)}${taxNote(taxRate)}`)
         : errorEmbed('🥣 Mở bát! Bạn thua! 😢', `${diceBlock}\n\nTổng: **${result.total}** → **${resultLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thua -${formatCurrency(betAmount)}`)
     ).setFooter({ text: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}` });
 
     await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
 
     logger.info('[CASINO] Tai Xiu round played', {
-        userId, guildId, betType, betAmount, outcome: result.outcome, won, payout
+        userId, guildId, betType, betAmount, outcome: result.outcome, won, netPayout, taxRate
     });
 }
 
@@ -190,7 +198,7 @@ async function handleXocDia(interaction, client) {
         );
     }
 
-    await checkAndConsumeBetLimit(client, guildId, userId, betAmount);
+    const { taxRate } = await recordBetAndGetTaxRate(client, guildId, userId, betAmount);
 
     const isParityBet = betChoice === 'chan' || betChoice === 'le';
     const betLabel = isParityBet
@@ -230,10 +238,13 @@ async function handleXocDia(interaction, client) {
         multiplier = XOCDIA_EXACT_MULTIPLIER[result.redCount] ?? 2;
     }
 
-    const payout = won ? Math.floor(betAmount * multiplier) : 0;
+    const grossPayout = won ? Math.floor(betAmount * multiplier) : 0;
+    const grossProfit = won ? grossPayout - betAmount : 0;
+    const taxAmount = won ? Math.floor(grossProfit * taxRate) : 0;
+    const netPayout = won ? grossPayout - taxAmount : 0;
 
     const freshData = await getEconomyData(client, guildId, userId);
-    freshData.wallet = Math.max(0, (freshData.wallet || 0) - betAmount + payout);
+    freshData.wallet = Math.max(0, (freshData.wallet || 0) - betAmount + netPayout);
     freshData.lastCasinoBet = now;
     await setEconomyData(client, guildId, userId, freshData);
 
@@ -241,14 +252,14 @@ async function handleXocDia(interaction, client) {
     const parityLabel = result.redCount % 2 === 0 ? 'CHẴN' : 'LẺ';
 
     const embed = (won
-        ? successEmbed('🥣 Mở đĩa! Bạn thắng! 🎉', `${coinsDisplay}\n\n**${result.redCount} Đỏ** → **${parityLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(payout - betAmount)}`)
+        ? successEmbed('🥣 Mở đĩa! Bạn thắng! 🎉', `${coinsDisplay}\n\n**${result.redCount} Đỏ** → **${parityLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(netPayout - betAmount)}${taxNote(taxRate)}`)
         : errorEmbed('🥣 Mở đĩa! Bạn thua! 😢', `${coinsDisplay}\n\n**${result.redCount} Đỏ** → **${parityLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thua -${formatCurrency(betAmount)}`)
     ).setFooter({ text: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}` });
 
     await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
 
     logger.info('[CASINO] Xoc Dia round played', {
-        userId, guildId, betChoice, betAmount, redCount: result.redCount, won, payout
+        userId, guildId, betChoice, betAmount, redCount: result.redCount, won, netPayout, taxRate
     });
 }
 
