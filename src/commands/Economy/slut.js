@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed } from '../../utils/embeds.js';
-import { getEconomyData, setEconomyData } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, formatCurrency } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
@@ -166,14 +166,14 @@ export default {
                 timestamp: new Date().toISOString()
             });
 
-            const amountLabel = `${outcome.delta >= 0 ? '+' : '-'}$${Math.abs(outcome.delta).toLocaleString()}`;
+            const amountLabel = `${outcome.delta >= 0 ? '+' : '-'}${formatCurrency(Math.abs(outcome.delta))}`;
             const summaryLines = [
                 `${outcome.message}`,
                 `💸 **Net Result:** ${amountLabel}`,
-                `💳 **Current Balance:** $${userData.wallet.toLocaleString()}`,
+                `💳 **Current Balance:** ${formatCurrency(userData.wallet)}`,
                 `📊 **Total Sessions:** ${userData.totalSluts}`,
-                `💵 **Total Earned:** $${(userData.totalSlutEarnings || 0).toLocaleString()}`,
-                `🧾 **Total Lost:** $${(userData.totalSlutLosses || 0).toLocaleString()}`
+                `💵 **Total Earned:** ${formatCurrency(userData.totalSlutEarnings || 0)}`,
+                `🧾 **Total Lost:** ${formatCurrency(userData.totalSlutLosses || 0)}`
             ];
 
             const embed = createEmbed({
