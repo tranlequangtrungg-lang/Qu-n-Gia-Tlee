@@ -4,7 +4,7 @@ import { getEconomyData, getMaxBankCapacity } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
-
+import { getEconomyData, getMaxBankCapacity, computeDailyBetStatus, formatCooldown } from '../../utils/economy.js';
 export default {
     data: new SlashCommandBuilder()
         .setName('balance')
@@ -72,6 +72,14 @@ export default {
                     {
                         name: "💰 Total",
                         value: `$${(wallet + bank).toLocaleString()}`,
+                        inline: true,
+                    }
+                    {
+                        name: "🎲 Hạn mức cược hôm nay",
+                        value: (() => {
+                            const bet = computeDailyBetStatus(userData);
+                            return `$${bet.remaining.toLocaleString()} / $${bet.budget.toLocaleString()}`;
+                        })(),
                         inline: true,
                     }
                 )
