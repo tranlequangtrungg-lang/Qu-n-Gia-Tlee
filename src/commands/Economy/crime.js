@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { getEconomyData, setEconomyData } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, formatCurrency } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 
@@ -94,7 +94,7 @@ export default {
                 
                 const embed = successEmbed(
                     "🕵️ Crime Successful!",
-                    `You successfully committed ${crime.name} and earned **${amountEarned}** coins!`
+                    `You successfully committed ${crime.name} and earned **${formatCurrency(amountEarned)}**!`
                 );
                 
                 await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
@@ -110,7 +110,7 @@ export default {
                 const embed = warningEmbed(
                     "🚔 Crime Failed!",
                     `You were caught while attempting ${crime.name} and have been sent to jail! ` +
-                    `You were fined ${fine.toLocaleString()} coins and will be in jail for 2 hours.`
+                    `You were fined ${formatCurrency(fine)} and will be in jail for 2 hours.`
                 );
                 
                 await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
