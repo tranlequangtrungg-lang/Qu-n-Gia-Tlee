@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { getEconomyData, setEconomyData, getMaxBankCapacity } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, getMaxBankCapacity, formatCurrency } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 
 import { InteractionHelper } from '../../utils/interactionHelper.js';
@@ -65,17 +65,17 @@ export default {
 
             const embed = successEmbed(
                 'Withdrawal Successful',
-                `You successfully withdrew **$${withdrawAmount.toLocaleString()}** from your bank.`
+                `You successfully withdrew **${formatCurrency(withdrawAmount)}** from your bank.`
             )
                 .addFields(
                     {
                         name: "New Cash Balance",
-                        value: `$${userData.wallet.toLocaleString()}`,
+                        value: formatCurrency(userData.wallet),
                         inline: true,
                     },
                     {
                         name: "New Bank Balance",
-                        value: `$${userData.bank.toLocaleString()}`,
+                        value: formatCurrency(userData.bank),
                         inline: true,
                     },
                 );
