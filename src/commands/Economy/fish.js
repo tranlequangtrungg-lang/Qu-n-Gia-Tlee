@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { getEconomyData, setEconomyData } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, formatCurrency } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 
@@ -110,13 +110,13 @@ export default {
 
             const embed = createEmbed({
                 title: 'Fishing Success!',
-                description: `${catchMessage}\n\nYou caught a **${fishCaught.emoji} ${fishCaught.name}**! You sold it for **$${finalEarned.toLocaleString()}**!${multiplierMessage}`,
+                description: `${catchMessage}\n\nYou caught a **${fishCaught.emoji} ${fishCaught.name}**! You sold it for **${formatCurrency(finalEarned)}**!${multiplierMessage}`,
                 color: rarityColors[fishCaught.rarity]
             })
                 .addFields(
                     {
                         name: "New Cash Balance",
-                        value: `$${userData.wallet.toLocaleString()}`,
+                        value: formatCurrency(userData.wallet),
                         inline: true,
                     },
                     {
