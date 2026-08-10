@@ -135,7 +135,7 @@ export function checkCooldown(userData, action) {
     };
 }
 
-function formatCooldown(ms) {
+export function formatCooldown(ms) {
     if (ms < 1000) return 'now';
     
     const seconds = Math.floor(ms / 1000);
@@ -400,3 +400,84 @@ export function getShopInventory() {
         }
     ];
 }
+/**
+ * Tính trạng thái hạn mức cược hôm nay mà KHÔNG lưu DB — dùng để hiển thị (vd trong /balance).
+ */
+export function computeDailyBetStatus(userData) {
+    const now = Date.now();
+    const needsReset = !userData.dailyBetResetAt || now - userData.dailyBetResetAt >= BET_LIMIT_WINDOW_MS;
+
+    if (needsReset) {
+        const wallet = userData.wallet || 0;
+        const budget = Math.min(
+            Math.max(Math.floor(wallet * MAX_DAILY_BET_PERCENT), MIN_DAILY_BET_BUDGET),
+            MAX_DAILY_BET_FLAT_CAP
+        );
+        return { budget, used: 0, remaining: budget, resetsInMs: 0 };
+    }
+
+    const remaining = Math.max(0, (userData.dailyBetBudget || 0) - (userData.dailyBetTotal || 0));
+    const resetsInMs = Math.max(0, BET_LIMIT_WINDOW_MS - (now - userData.dailyBetResetAt));
+
+    return {
+        budget: userData.dailyBetBudget || 0,
+        used: userData.dailyBetTotal || 0,
+        remaining,
+        resetsInMs
+    };
+}
+
+/**
+ * Kiểm tra + trừ vào hạn mức cược ngày. Gọi hàm này TRƯỚC khi trừ tiền cược thật (removeMoney).
+ * Ném lỗi VALIDATION nếu vượt hạn mức — mọi game (Tài Xỉu, Xóc Đĩa, Đua Ngựa...) đều dùng chung hàm này.
+ */
+export const checkAndConsumeBetLimit = wrapServiceBoundary(async function checkAndConsumeBetLimit(client, guildId, userId, betAmount) {
+    const validAmount = validateNumber(betAmount, 'betAmount');
+    if (validAmount === null || validAmount <= 0) {
+        throw createError(
+            'Invalid bet amount',
+            ErrorTypes.VALIDATION,
+            'Số tiền cược phải là số dương.',
+            { guildId, userId, betAmount, operation: 'checkAndConsumeBetLimit' }
+        );
+    }
+
+    const userData = await getEconomyData(client, guildId, userId);
+    const now = Date.now();
+    const needsReset = !userData.dailyBetResetAt || now - userData.dailyBetResetAt >= BET_LIMIT_WINDOW_MS;
+
+    if (needsReset) {
+        const wallet = userData.wallet || 0;
+        userData.dailyBetBudget = Math.min(
+            Math.max(Math.floor(wallet * MAX_DAILY_BET_PERCENT), MIN_DAILY_BET_BUDGET),
+            MAX_DAILY_BET_FLAT_CAP
+        );
+        userData.dailyBetTotal = 0;
+        userData.dailyBetResetAt = now;
+    }
+
+    const remainingBudget = Math.max(0, userData.dailyBetBudget - userData.dailyBetTotal);
+
+    if (validAmount > remainingBudget) {
+        const resetsInMs = BET_LIMIT_WINDOW_MS - (now - userData.dailyBetResetAt);
+        throw createError(
+            'Daily bet limit exceeded',
+            ErrorTypes.VALIDATION,
+            `Bạn đã đạt hạn mức cược trong ngày. Còn lại: **${formatCurrency(remainingBudget)}** (đặt lại sau ${formatCooldown(resetsInMs)}).`,
+            { guildId, userId, betAmount: validAmount, remainingBudget, operation: 'checkAndConsumeBetLimit' }
+        );
+    }
+
+    userData.dailyBetTotal += validAmount;
+    await setEconomyData(client, guildId, userId, userData);
+
+    return {
+        budget: userData.dailyBetBudget,
+        used: userData.dailyBetTotal,
+        remaining: userData.dailyBetBudget - userData.dailyBetTotal
+    };
+}, {
+    service: 'economy',
+    operation: 'checkAndConsumeBetLimit',
+    userMessage: 'Không thể xử lý hạn mức cược. Vui lòng thử lại.',
+});
