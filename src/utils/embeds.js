@@ -13,7 +13,6 @@ function sanitizeEmbedText(text = '') {
   }
 
   return text
-    .replace(EMOJI_REGEX, '')
     .replace(/[ \t]+/g, ' ')  // Replace consecutive spaces/tabs with single space
     .replace(/[ \t]\n/g, '\n')  // Remove spaces before newlines
     .replace(/\n[ \t]/g, '\n')  // Remove spaces after newlines
