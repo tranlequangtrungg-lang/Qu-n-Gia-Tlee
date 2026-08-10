@@ -11,7 +11,10 @@ import { createError, ErrorTypes, wrapServiceBoundary } from './errorHandler.js'
 const ECONOMY_CONFIG = BotConfig.economy || {};
 const BASE_BANK_CAPACITY = ECONOMY_CONFIG.baseBankCapacity || 10000;
 const BANK_CAPACITY_PER_LEVEL = ECONOMY_CONFIG.bankCapacityPerLevel || 5000;
-const DAILY_AMOUNT = ECONOMY_CONFIG.dailyAmount || 100;
+const MAX_DAILY_BET_PERCENT = ECONOMY_CONFIG.maxDailyBetPercent ?? 0.3;
+const MIN_DAILY_BET_BUDGET = ECONOMY_CONFIG.minDailyBetBudget ?? 500;
+const MAX_DAILY_BET_FLAT_CAP = ECONOMY_CONFIG.maxDailyBetFlatCap ?? 100000;
+const BET_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const WORK_MIN = ECONOMY_CONFIG.workMin || 10;
 const WORK_MAX = ECONOMY_CONFIG.workMax || 100;
 const COOLDOWNS = ECONOMY_CONFIG.cooldowns || {
