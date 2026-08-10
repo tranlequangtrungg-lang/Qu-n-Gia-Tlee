@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { getEconomyData, setEconomyData } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, formatCurrency } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 
@@ -53,7 +53,7 @@ export default {
                 throw createError(
                     "Insufficient cash for gamble",
                     ErrorTypes.VALIDATION,
-                    `You only have $${userData.wallet.toLocaleString()} cash, but you are trying to bet $${betAmount.toLocaleString()}.`,
+                    `You only have ${formatCurrency(userData.wallet)} cash, but you are trying to bet ${formatCurrency(betAmount)}.`,
                     { required: betAmount, current: userData.wallet }
                 );
             }
@@ -83,24 +83,23 @@ export default {
 
             if (win) {
                 const amountWon = Math.floor(betAmount * PAYOUT_MULTIPLIER);
-                // Net change: the bet is replaced by the payout (bet was at stake, not pre-deducted)
                 cashChange = amountWon - betAmount;
 
                 resultEmbed = successEmbed(
                     "🎉 You Won!",
-                    `You successfully gambled and turned your **$${betAmount.toLocaleString()}** bet into **$${amountWon.toLocaleString()}**!${cloverMessage}`,
+                    `You successfully gambled and turned your **${formatCurrency(betAmount)}** bet into **${formatCurrency(amountWon)}**!${cloverMessage}`,
                 );
             } else {
-cashChange = -betAmount;
+                cashChange = -betAmount;
 
                 resultEmbed = warningEmbed(
                     "💔 You Lost...",
-                    `The dice rolled against you. You lost your **$${betAmount.toLocaleString()}** bet.`,
+                    `The dice rolled against you. You lost your **${formatCurrency(betAmount)}** bet.`,
                 );
             }
 
             userData.wallet = (userData.wallet || 0) + cashChange;
-userData.lastGamble = now;
+            userData.lastGamble = now;
 
             await setEconomyData(client, guildId, userId, userData);
 
@@ -108,7 +107,7 @@ userData.lastGamble = now;
 
             resultEmbed.addFields({
                 name: "New Cash Balance",
-                value: `$${newCash.toLocaleString()}`,
+                value: formatCurrency(newCash),
                 inline: true,
             });
 
