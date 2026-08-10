@@ -159,15 +159,16 @@ export const botConfig = {
   // ECONOMY SETTINGS
   // =========================
   economy: {
-    currency: {
+currency: {
       // Currency display name.
-      name: "coins",
+      name: "Bcoin",
       // Plural display name.
-      namePlural: "coins",
-      // Currency symbol shown in balances.
+      namePlural: "Bcoin",
+      // Emoji shown before the currency name.
+      emoji: "<:Bcoin:1535433333977260032>",
+      // Currency symbol (giữ lại phòng chỗ nào còn dùng dạng cũ, không dùng cho hiển thị chính nữa).
       symbol: "$",
     },
-
     // Starting balance for new users.
     startingBalance: 0,
 
