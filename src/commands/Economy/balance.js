@@ -1,6 +1,5 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { logger } from '../../utils/logger.js';
 import { getEconomyData, getMaxBankCapacity, computeDailyBetStatus, formatCooldown } from '../../utils/economy.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
