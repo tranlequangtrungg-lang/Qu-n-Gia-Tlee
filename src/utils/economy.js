@@ -11,10 +11,28 @@ import { createError, ErrorTypes, wrapServiceBoundary } from './errorHandler.js'
 const ECONOMY_CONFIG = BotConfig.economy || {};
 const BASE_BANK_CAPACITY = ECONOMY_CONFIG.baseBankCapacity || 10000;
 const BANK_CAPACITY_PER_LEVEL = ECONOMY_CONFIG.bankCapacityPerLevel || 5000;
-const MAX_DAILY_BET_PERCENT = ECONOMY_CONFIG.maxDailyBetPercent ?? 0.3;
-const MIN_DAILY_BET_BUDGET = ECONOMY_CONFIG.minDailyBetBudget ?? 500;
-const MAX_DAILY_BET_FLAT_CAP = ECONOMY_CONFIG.maxDailyBetFlatCap ?? 100000;
+
+// ===== Hạn mức cược/ngày (đã TĂNG so với trước) =====
+const MAX_DAILY_BET_PERCENT = ECONOMY_CONFIG.maxDailyBetPercent ?? 0.6; // 60% số dư ví
+const MIN_DAILY_BET_BUDGET = ECONOMY_CONFIG.minDailyBetBudget ?? 2000;
+const MAX_DAILY_BET_FLAT_CAP = ECONOMY_CONFIG.maxDailyBetFlatCap ?? 500000;
 const BET_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// ===== Thuế lũy tiến khi cược vượt hạn mức (áp dụng trên TIỀN THẮNG) =====
+// Mốc tính theo tỉ lệ: (tổng đã cược trong ngày, TÍNH CẢ lượt cược hiện tại) / hạn mức ngày
+const BET_TAX_TIERS = [
+    { threshold: 2, rate: 0.35 },  // > 200% hạn mức -> thuế 35%
+    { threshold: 1.5, rate: 0.20 }, // > 150% hạn mức -> thuế 20%
+    { threshold: 1, rate: 0.10 },   // > 100% hạn mức -> thuế 10%
+];
+
+function getBetTaxRate(usedRatio) {
+    for (const tier of BET_TAX_TIERS) {
+        if (usedRatio > tier.threshold) return tier.rate;
+    }
+    return 0;
+}
+
 const WORK_MIN = ECONOMY_CONFIG.workMin || 10;
 const WORK_MAX = ECONOMY_CONFIG.workMax || 100;
 const COOLDOWNS = ECONOMY_CONFIG.cooldowns || {
@@ -401,6 +419,7 @@ export function getShopInventory() {
         }
     ];
 }
+
 /**
  * Tính trạng thái hạn mức cược hôm nay mà KHÔNG lưu DB — dùng để hiển thị (vd trong /balance).
  */
@@ -414,32 +433,38 @@ export function computeDailyBetStatus(userData) {
             Math.max(Math.floor(wallet * MAX_DAILY_BET_PERCENT), MIN_DAILY_BET_BUDGET),
             MAX_DAILY_BET_FLAT_CAP
         );
-        return { budget, used: 0, remaining: budget, resetsInMs: 0 };
+        return { budget, used: 0, remaining: budget, resetsInMs: 0, taxRate: 0 };
     }
 
-    const remaining = Math.max(0, (userData.dailyBetBudget || 0) - (userData.dailyBetTotal || 0));
+    const used = userData.dailyBetTotal || 0;
+    const budget = userData.dailyBetBudget || 0;
+    const remaining = Math.max(0, budget - used);
     const resetsInMs = Math.max(0, BET_LIMIT_WINDOW_MS - (now - userData.dailyBetResetAt));
+    const usedRatio = budget > 0 ? used / budget : 0;
 
     return {
-        budget: userData.dailyBetBudget || 0,
-        used: userData.dailyBetTotal || 0,
+        budget,
+        used,
         remaining,
-        resetsInMs
+        resetsInMs,
+        taxRate: getBetTaxRate(usedRatio)
     };
 }
 
 /**
- * Kiểm tra + trừ vào hạn mức cược ngày. Gọi hàm này TRƯỚC khi trừ tiền cược thật (removeMoney).
- * Ném lỗi VALIDATION nếu vượt hạn mức — mọi game (Tài Xỉu, Xóc Đĩa, Đua Ngựa...) đều dùng chung hàm này.
+ * Ghi nhận 1 lượt cược vào hạn mức ngày và trả về mức THUẾ áp dụng cho tiền thắng của lượt này.
+ * KHÔNG còn chặn cứng — người chơi luôn được cược, chỉ bị đánh thuế lũy tiến trên tiền thắng
+ * nếu tổng cược trong ngày (tính cả lượt này) vượt hạn mức.
+ * Gọi hàm này trước khi cộng/trừ tiền cược thật; áp `taxRate` trả về vào phần THẮNG (payout - betAmount).
  */
-export const checkAndConsumeBetLimit = wrapServiceBoundary(async function checkAndConsumeBetLimit(client, guildId, userId, betAmount) {
+export const recordBetAndGetTaxRate = wrapServiceBoundary(async function recordBetAndGetTaxRate(client, guildId, userId, betAmount) {
     const validAmount = validateNumber(betAmount, 'betAmount');
     if (validAmount === null || validAmount <= 0) {
         throw createError(
             'Invalid bet amount',
             ErrorTypes.VALIDATION,
             'Số tiền cược phải là số dương.',
-            { guildId, userId, betAmount, operation: 'checkAndConsumeBetLimit' }
+            { guildId, userId, betAmount, operation: 'recordBetAndGetTaxRate' }
         );
     }
 
@@ -457,28 +482,20 @@ export const checkAndConsumeBetLimit = wrapServiceBoundary(async function checkA
         userData.dailyBetResetAt = now;
     }
 
-    const remainingBudget = Math.max(0, userData.dailyBetBudget - userData.dailyBetTotal);
-
-    if (validAmount > remainingBudget) {
-        const resetsInMs = BET_LIMIT_WINDOW_MS - (now - userData.dailyBetResetAt);
-        throw createError(
-            'Daily bet limit exceeded',
-            ErrorTypes.VALIDATION,
-            `Bạn đã đạt hạn mức cược trong ngày. Còn lại: **${formatCurrency(remainingBudget)}** (đặt lại sau ${formatCooldown(resetsInMs)}).`,
-            { guildId, userId, betAmount: validAmount, remainingBudget, operation: 'checkAndConsumeBetLimit' }
-        );
-    }
-
-    userData.dailyBetTotal += validAmount;
+    userData.dailyBetTotal = (userData.dailyBetTotal || 0) + validAmount;
     await setEconomyData(client, guildId, userId, userData);
+
+    const usedRatio = userData.dailyBetBudget > 0 ? userData.dailyBetTotal / userData.dailyBetBudget : 0;
+    const taxRate = getBetTaxRate(usedRatio);
 
     return {
         budget: userData.dailyBetBudget,
         used: userData.dailyBetTotal,
-        remaining: userData.dailyBetBudget - userData.dailyBetTotal
+        remaining: Math.max(0, userData.dailyBetBudget - userData.dailyBetTotal),
+        taxRate
     };
 }, {
     service: 'economy',
-    operation: 'checkAndConsumeBetLimit',
+    operation: 'recordBetAndGetTaxRate',
     userMessage: 'Không thể xử lý hạn mức cược. Vui lòng thử lại.',
 });
