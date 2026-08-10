@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { getEconomyData, addMoney, removeMoney, setEconomyData } from '../../utils/economy.js';
+import { getEconomyData, addMoney, removeMoney, setEconomyData, formatCurrency } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
@@ -103,17 +103,17 @@ export default {
 
             const embed = successEmbed(
                 'Payment Successful',
-                `You successfully paid **${receiver.username}** the amount of **$${amount.toLocaleString()}**!`
+                `You successfully paid **${receiver.username}** the amount of **${formatCurrency(amount)}**!`
             )
                 .addFields(
                     {
                         name: "Payment Amount",
-                        value: `$${amount.toLocaleString()}`,
+                        value: formatCurrency(amount),
                         inline: true,
                     },
                     {
                         name: "Your New Balance",
-                        value: `$${updatedSenderData.wallet.toLocaleString()}`,
+                        value: formatCurrency(updatedSenderData.wallet),
                         inline: true,
                     },
                 )
@@ -135,10 +135,10 @@ export default {
             try {
                 const receiverEmbed = createEmbed({ 
                     title: "Incoming Payment!", 
-                    description: `${interaction.user.username} paid you **$${amount.toLocaleString()}**.` 
+                    description: `${interaction.user.username} paid you **${formatCurrency(amount)}**.` 
                 }).addFields({
                     name: "Your New Cash",
-                    value: `$${updatedReceiverData.wallet.toLocaleString()}`,
+                    value: formatCurrency(updatedReceiverData.wallet),
                     inline: true,
                 });
                 await receiver.send({ embeds: [receiverEmbed] });
