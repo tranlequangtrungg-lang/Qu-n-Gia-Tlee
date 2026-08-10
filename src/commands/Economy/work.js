@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { getEconomyData, setEconomyData } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, formatCurrency } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
@@ -99,12 +99,12 @@ export default {
 
             const embed = successEmbed(
                 "💼 Work Complete!",
-                `You worked as a **${job}** and earned **$${earned.toLocaleString()}**!${multiplierMessage}`
+                `You worked as a **${job}** and earned **${formatCurrency(earned)}**!${multiplierMessage}`
             )
                 .addFields(
                     {
                         name: "New Balance",
-                        value: `$${userData.wallet.toLocaleString()}`,
+                        value: formatCurrency(userData.wallet),
                         inline: true,
                     },
                     {
