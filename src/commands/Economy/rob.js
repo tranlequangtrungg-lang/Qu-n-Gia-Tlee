@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { successEmbed, warningEmbed, buildUserErrorEmbed } from '../../utils/embeds.js';
-import { getEconomyData, setEconomyData } from '../../utils/economy.js';
+import { getEconomyData, setEconomyData, formatCurrency } from '../../utils/economy.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import { BotConfig } from '../../config/bot.js';
@@ -9,6 +9,7 @@ const ROB_COOLDOWN = BotConfig.economy?.cooldowns?.rob ?? 4 * 60 * 60 * 1000;
 const BASE_ROB_SUCCESS_CHANCE = BotConfig.economy?.robSuccessRate ?? 0.4;
 const ROB_PERCENTAGE = 0.15;
 const FINE_PERCENTAGE = 0.1;
+const MIN_VICTIM_WALLET = 500;
 
 export default {
     data: new SlashCommandBuilder()
@@ -75,12 +76,12 @@ export default {
                 );
             }
 
-            if (victimData.wallet < 500) {
+            if (victimData.wallet < MIN_VICTIM_WALLET) {
                 throw createError(
                     "Victim too poor",
                     ErrorTypes.VALIDATION,
-                    `${victimUser.username} is too poor. They need at least $500 cash to be worth robbing.`,
-                    { victimWallet: victimData.wallet, required: 500 }
+                    `${victimUser.username} is too poor. They need at least ${formatCurrency(MIN_VICTIM_WALLET)} cash to be worth robbing.`,
+                    { victimWallet: victimData.wallet, required: MIN_VICTIM_WALLET }
                 );
             }
 
@@ -111,7 +112,7 @@ export default {
 
                 resultEmbed = successEmbed(
                     'Robbery Successful',
-                    `You successfully stole **$${amountStolen.toLocaleString()}** from ${victimUser.username}!`
+                    `You successfully stole **${formatCurrency(amountStolen)}** from ${victimUser.username}!`
                 );
             } else {
                 const fineAmount = Math.floor((robberData.wallet || 0) * FINE_PERCENTAGE);
@@ -124,7 +125,7 @@ export default {
 
                 resultEmbed = buildUserErrorEmbed(
                     'unknown',
-                    `You failed the robbery and were caught! You were fined **$${fineAmount.toLocaleString()}** of your own cash.`,
+                    `You failed the robbery and were caught! You were fined **${formatCurrency(fineAmount)}** of your own cash.`,
                     { titleOverride: 'Robbery Failed' }
                 );
             }
@@ -138,12 +139,12 @@ export default {
                 .addFields(
                     {
                         name: `Your New Cash (${interaction.user.username})`,
-                        value: `$${robberData.wallet.toLocaleString()}`,
+                        value: formatCurrency(robberData.wallet),
                         inline: true,
                     },
                     {
                         name: `Victim's New Cash (${victimUser.username})`,
-                        value: `$${victimData.wallet.toLocaleString()}`,
+                        value: formatCurrency(victimData.wallet),
                         inline: true,
                     },
                 )
