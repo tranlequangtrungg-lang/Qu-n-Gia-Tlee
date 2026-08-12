@@ -18,18 +18,11 @@ const MIN_DAILY_BET_BUDGET = ECONOMY_CONFIG.minDailyBetBudget ?? 2000;
 const MAX_DAILY_BET_FLAT_CAP = ECONOMY_CONFIG.maxDailyBetFlatCap ?? 500000;
 const BET_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-// ===== Thuế lũy tiến khi cược vượt hạn mức =====
-const BET_TAX_TIERS = [
-    { threshold: 2, rate: 0.35 },
-    { threshold: 1.5, rate: 0.20 },
-    { threshold: 1, rate: 0.10 },
-];
+// ===== Thuế cố định khi cược vượt hạn mức =====
+const FLAT_OVER_LIMIT_TAX_RATE = 0.075; // 7.5%, áp dụng đồng đều bất kể vượt ít hay nhiều
 
 function getBetTaxRate(usedRatio) {
-    for (const tier of BET_TAX_TIERS) {
-        if (usedRatio > tier.threshold) return tier.rate;
-    }
-    return 0;
+    return usedRatio > 1 ? FLAT_OVER_LIMIT_TAX_RATE : 0;
 }
 
 const WORK_MIN = ECONOMY_CONFIG.workMin || 10;
