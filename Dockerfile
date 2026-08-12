@@ -1,4 +1,5 @@
 FROM node:20-alpine
+RUN apk add --no-cache fontconfig freetype
 WORKDIR /usr/src/app
 ENV NODE_ENV=production
 COPY package*.json ./
