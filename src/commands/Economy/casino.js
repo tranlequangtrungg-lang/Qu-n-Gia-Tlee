@@ -1,5 +1,5 @@
-import { SlashCommandBuilder } from 'discord.js';
-import { successEmbed, errorEmbed, infoEmbed } from '../../utils/embeds.js';
+import { SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
+import { createEmbed } from '../../utils/embeds.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
@@ -10,6 +10,8 @@ import {
     formatCurrency,
     formatCooldown
 } from '../../utils/economy.js';
+import { renderTaiXiuFrame, renderXocDiaFrame, renderJackpotCard } from '../../utils/casinoRender.js';
+import { getJackpot, addToJackpot, rollJackpotExplosion, getJackpotRakeAmount } from '../../utils/casinoJackpot.js';
 
 const CASINO_BET_COOLDOWN = 3 * 1000;
 const MIN_BET = 10;
@@ -17,42 +19,25 @@ const MAX_BET = 1000000;
 
 const TAI_XIU_RETURN_MULTIPLIER = 2;
 const BAO_RETURN_MULTIPLIER = 4;
+const DIE_REVEAL_DELAY_MS = 2000;
+const SHAKE_FRAMES = 2;
+const SHAKE_DELAY_MS = 600;
 
-const ANIMATION_FRAMES = 4;
-const ANIMATION_DELAY_MS = 500;
+const XOCDIA_EXACT_MULTIPLIER = { 0: 8, 1: 3, 2: 2.5, 3: 3, 4: 8 };
+const XOCDIA_PARITY_MULTIPLIER = 2;
+const XOCDIA_REVEAL_DELAY_MS = 900;
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// ===================== VẼ XÚC XẮC BẰNG LƯỚI EMOJI (to, rõ) =====================
-const PIP_GRID = {
-    1: [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
-    2: [[1, 0, 0], [0, 0, 0], [0, 0, 1]],
-    3: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-    4: [[1, 0, 1], [0, 0, 0], [1, 0, 1]],
-    5: [[1, 0, 1], [0, 1, 0], [1, 0, 1]],
-    6: [[1, 0, 1], [1, 0, 1], [1, 0, 1]],
-};
-const PIP_ON = '🔴';
-const PIP_OFF = '⬜';
-const DICE_GAP = '　'; // khoảng trắng full-width, cách đều giữa các viên xúc xắc
-
-function dieLines(value) {
-    return PIP_GRID[value].map(row => row.map(cell => (cell ? PIP_ON : PIP_OFF)).join(''));
-}
-
-function renderDiceBlock(diceValues) {
-    const allLines = diceValues.map(dieLines);
-    const lines = [];
-    for (let row = 0; row < 3; row++) {
-        lines.push(allLines.map(dieRows => dieRows[row]).join(DICE_GAP));
+function shuffle(array) {
+    const arr = [...array];
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
     }
-    return lines.join('\n');
-}
-
-function randomDiceValues(count) {
-    return Array.from({ length: count }, () => Math.floor(Math.random() * 6) + 1);
+    return arr;
 }
 
 function rollOne() {
@@ -68,13 +53,6 @@ function evaluateTaiXiu() {
     return { dice, total, outcome };
 }
 
-// ===================== XÓC ĐĨA =====================
-const XOCDIA_EXACT_MULTIPLIER = { 0: 8, 1: 3, 2: 2.5, 3: 3, 4: 8 };
-const XOCDIA_PARITY_MULTIPLIER = 2;
-const COIN_RED = '🔴';
-const COIN_WHITE = '⚪';
-const COIN_HIDDEN = '❓';
-
 function rollXocDia() {
     let redCount = 0;
     const coinsIsRed = [];
@@ -84,10 +62,6 @@ function rollXocDia() {
         if (isRed) redCount++;
     }
     return { coinsIsRed, redCount };
-}
-
-function renderCoinsRow(coinsIsRed) {
-    return coinsIsRed.map(r => (r ? COIN_RED : COIN_WHITE)).join('   ');
 }
 
 async function checkCasinoCooldown(userData, userId, guildId) {
@@ -105,9 +79,10 @@ async function checkCasinoCooldown(userData, userId, guildId) {
     return now;
 }
 
-function taxNote(taxRate) {
-    if (!taxRate) return '';
-    return `\n💸 _Đã vượt hạn mức cược ngày → thuế **${Math.round(taxRate * 100)}%** trên tiền thắng._`;
+async function sendFrame(interaction, imageBuffer, filename) {
+    const attachment = new AttachmentBuilder(imageBuffer, { name: filename });
+    const embed = createEmbed({ color: 'primary' }).setImage(`attachment://${filename}`);
+    await InteractionHelper.safeEditReply(interaction, { embeds: [embed], files: [attachment] });
 }
 
 // ===================== TÀI XỈU =====================
@@ -131,51 +106,85 @@ async function handleTaiXiu(interaction, client) {
 
     const { taxRate } = await recordBetAndGetTaxRate(client, guildId, userId, betAmount);
 
+    const rake = getJackpotRakeAmount(betAmount);
+    let jackpotAmount = await addToJackpot(client, guildId, 'taixiu', rake);
+
     const betLabel = { tai: 'Tài', xiu: 'Xỉu', bao: 'Bão' }[betType];
 
-    // Bát úp - lắc
-    const coveredEmbed = infoEmbed(
-        '🥣 Úp bát... lắc xúc xắc!',
-        `${betLabel} • Cược ${formatCurrency(betAmount)}\n\n_Đang lắc trong bát..._`
-    );
-    await InteractionHelper.safeEditReply(interaction, { embeds: [coveredEmbed] });
-    await sleep(ANIMATION_DELAY_MS);
-
-    for (let i = 0; i < ANIMATION_FRAMES; i++) {
-        const previewDice = randomDiceValues(3);
-        const embed = infoEmbed(
-            '🎲 Đang lắc...',
-            `${renderDiceBlock(previewDice)}\n\n${betLabel} • Cược ${formatCurrency(betAmount)}`
-        );
-        await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
-        await sleep(ANIMATION_DELAY_MS);
+    for (let i = 0; i < SHAKE_FRAMES; i++) {
+        const frame = await renderTaiXiuFrame({
+            phase: 'shaking',
+            revealedValues: [null, null, null],
+            statusText: 'Đang lắc bát...',
+            jackpotAmount,
+            betLabel,
+            betAmount,
+        });
+        await sendFrame(interaction, frame, 'taixiu.png');
+        await sleep(SHAKE_DELAY_MS);
     }
 
     const result = evaluateTaiXiu();
+    const revealOrder = shuffle([0, 1, 2]);
+    const revealedValues = [null, null, null];
+
+    for (const dieIndex of revealOrder) {
+        revealedValues[dieIndex] = result.dice[dieIndex];
+        const frame = await renderTaiXiuFrame({
+            phase: 'revealing',
+            revealedValues: [...revealedValues],
+            statusText: 'Đang mở bát...',
+            jackpotAmount,
+            betLabel,
+            betAmount,
+        });
+        await sendFrame(interaction, frame, 'taixiu.png');
+        await sleep(DIE_REVEAL_DELAY_MS);
+    }
+
     const won = result.outcome === betType;
     const multiplier = betType === 'bao' ? BAO_RETURN_MULTIPLIER : TAI_XIU_RETURN_MULTIPLIER;
     const grossPayout = won ? betAmount * multiplier : 0;
     const grossProfit = won ? grossPayout - betAmount : 0;
     const taxAmount = won ? Math.floor(grossProfit * taxRate) : 0;
     const netPayout = won ? grossPayout - taxAmount : 0;
+    const netWinnings = won ? netPayout - betAmount : 0;
+
+    if (taxAmount > 0) {
+        jackpotAmount = await addToJackpot(client, guildId, 'taixiu', taxAmount);
+    }
+
+    const explosion = await rollJackpotExplosion(client, guildId, 'taixiu');
+    let jackpotWon = 0;
+    if (explosion.hit) {
+        jackpotWon = explosion.amount;
+        jackpotAmount = 0;
+    }
 
     const freshData = await getEconomyData(client, guildId, userId);
-    freshData.wallet = Math.max(0, (freshData.wallet || 0) - betAmount + netPayout);
+    freshData.wallet = Math.max(0, (freshData.wallet || 0) - betAmount + netPayout + jackpotWon);
     freshData.lastCasinoBet = now;
     await setEconomyData(client, guildId, userId, freshData);
 
-    const diceBlock = renderDiceBlock(result.dice);
-    const resultLabel = { tai: 'TÀI', xiu: 'XỈU', bao: 'BÃO' }[result.outcome];
+    const finalFrame = await renderTaiXiuFrame({
+        phase: 'result',
+        revealedValues: result.dice,
+        jackpotAmount,
+        betLabel,
+        betAmount,
+        resultInfo: { total: result.total, outcome: result.outcome, won, netWinnings },
+        balanceText: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}`,
+    });
+    await sendFrame(interaction, finalFrame, 'taixiu.png');
 
-    const embed = (won
-        ? successEmbed('🥣 Mở bát! Bạn thắng! 🎉', `${diceBlock}\n\nTổng: **${result.total}** → **${resultLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(netPayout - betAmount)}${taxNote(taxRate)}`)
-        : errorEmbed('🥣 Mở bát! Bạn thua! 😢', `${diceBlock}\n\nTổng: **${result.total}** → **${resultLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thua -${formatCurrency(betAmount)}`)
-    ).setFooter({ text: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}` });
-
-    await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+    if (jackpotWon > 0) {
+        await interaction.followUp({
+            content: `🎆🎆🎆 **JACKPOT NỔ!** ${interaction.user} vừa trúng **${formatCurrency(jackpotWon)}** từ quỹ Jackpot Tài Xỉu! 🎆🎆🎆`,
+        });
+    }
 
     logger.info('[CASINO] Tai Xiu round played', {
-        userId, guildId, betType, betAmount, outcome: result.outcome, won, netPayout, taxRate
+        userId, guildId, betType, betAmount, outcome: result.outcome, won, netPayout, taxRate, jackpotWon
     });
 }
 
@@ -200,30 +209,40 @@ async function handleXocDia(interaction, client) {
 
     const { taxRate } = await recordBetAndGetTaxRate(client, guildId, userId, betAmount);
 
+    const rake = getJackpotRakeAmount(betAmount);
+    let jackpotAmount = await addToJackpot(client, guildId, 'xocdia', rake);
+
     const isParityBet = betChoice === 'chan' || betChoice === 'le';
     const betLabel = isParityBet
         ? (betChoice === 'chan' ? 'Chẵn' : 'Lẻ')
         : `${betChoice} Đỏ`;
 
-    // Úp đĩa
-    const coveredEmbed = infoEmbed(
-        '🥣 Úp đĩa... xóc!',
-        `${Array(4).fill(COIN_HIDDEN).join('   ')}\n\n${betLabel} • Cược ${formatCurrency(betAmount)}\n\n_Đang xóc..._`
-    );
-    await InteractionHelper.safeEditReply(interaction, { embeds: [coveredEmbed] });
-    await sleep(ANIMATION_DELAY_MS);
-
-    for (let i = 0; i < ANIMATION_FRAMES; i++) {
-        const previewCoins = Array.from({ length: 4 }, () => Math.random() < 0.5);
-        const embed = infoEmbed(
-            '🪙 Đang xóc...',
-            `${renderCoinsRow(previewCoins)}\n\n${betLabel} • Cược ${formatCurrency(betAmount)}`
-        );
-        await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
-        await sleep(ANIMATION_DELAY_MS);
+    for (let i = 0; i < SHAKE_FRAMES; i++) {
+        const frame = await renderXocDiaFrame({
+            phase: 'shaking',
+            revealedCoins: [null, null, null, null],
+            statusText: 'Đang xóc đĩa...',
+            jackpotAmount,
+            betLabel,
+            betAmount,
+        });
+        await sendFrame(interaction, frame, 'xocdia.png');
+        await sleep(SHAKE_DELAY_MS);
     }
 
     const result = rollXocDia();
+
+    const partialReveal = [result.coinsIsRed[0], result.coinsIsRed[1], null, null];
+    const partialFrame = await renderXocDiaFrame({
+        phase: 'revealing',
+        revealedCoins: partialReveal,
+        statusText: 'Đang mở đĩa...',
+        jackpotAmount,
+        betLabel,
+        betAmount,
+    });
+    await sendFrame(interaction, partialFrame, 'xocdia.png');
+    await sleep(XOCDIA_REVEAL_DELAY_MS);
 
     let won = false;
     let multiplier = 0;
@@ -242,25 +261,57 @@ async function handleXocDia(interaction, client) {
     const grossProfit = won ? grossPayout - betAmount : 0;
     const taxAmount = won ? Math.floor(grossProfit * taxRate) : 0;
     const netPayout = won ? grossPayout - taxAmount : 0;
+    const netWinnings = won ? netPayout - betAmount : 0;
+
+    if (taxAmount > 0) {
+        jackpotAmount = await addToJackpot(client, guildId, 'xocdia', taxAmount);
+    }
+
+    const explosion = await rollJackpotExplosion(client, guildId, 'xocdia');
+    let jackpotWon = 0;
+    if (explosion.hit) {
+        jackpotWon = explosion.amount;
+        jackpotAmount = 0;
+    }
 
     const freshData = await getEconomyData(client, guildId, userId);
-    freshData.wallet = Math.max(0, (freshData.wallet || 0) - betAmount + netPayout);
+    freshData.wallet = Math.max(0, (freshData.wallet || 0) - betAmount + netPayout + jackpotWon);
     freshData.lastCasinoBet = now;
     await setEconomyData(client, guildId, userId, freshData);
 
-    const coinsDisplay = renderCoinsRow(result.coinsIsRed);
-    const parityLabel = result.redCount % 2 === 0 ? 'CHẴN' : 'LẺ';
+    const finalFrame = await renderXocDiaFrame({
+        phase: 'result',
+        revealedCoins: result.coinsIsRed,
+        jackpotAmount,
+        betLabel,
+        betAmount,
+        resultInfo: { redCount: result.redCount, won, netWinnings },
+        balanceText: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}`,
+    });
+    await sendFrame(interaction, finalFrame, 'xocdia.png');
 
-    const embed = (won
-        ? successEmbed('🥣 Mở đĩa! Bạn thắng! 🎉', `${coinsDisplay}\n\n**${result.redCount} Đỏ** → **${parityLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thắng +${formatCurrency(netPayout - betAmount)}${taxNote(taxRate)}`)
-        : errorEmbed('🥣 Mở đĩa! Bạn thua! 😢', `${coinsDisplay}\n\n**${result.redCount} Đỏ** → **${parityLabel}**\n\n${betLabel} • Cược ${formatCurrency(betAmount)} • Thua -${formatCurrency(betAmount)}`)
-    ).setFooter({ text: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}` });
-
-    await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+    if (jackpotWon > 0) {
+        await interaction.followUp({
+            content: `🎆🎆🎆 **JACKPOT NỔ!** ${interaction.user} vừa trúng **${formatCurrency(jackpotWon)}** từ quỹ Jackpot Xóc Đĩa! 🎆🎆🎆`,
+        });
+    }
 
     logger.info('[CASINO] Xoc Dia round played', {
-        userId, guildId, betChoice, betAmount, redCount: result.redCount, won, netPayout, taxRate
+        userId, guildId, betChoice, betAmount, redCount: result.redCount, won, netPayout, taxRate, jackpotWon
     });
+}
+
+async function handleJackpotLookup(interaction, client) {
+    const guildId = interaction.guildId;
+    const [taixiuJackpot, xocdiaJackpot] = await Promise.all([
+        getJackpot(client, guildId, 'taixiu'),
+        getJackpot(client, guildId, 'xocdia'),
+    ]);
+
+    const imageBuffer = await renderJackpotCard({ taixiuJackpot, xocdiaJackpot });
+    const attachment = new AttachmentBuilder(imageBuffer, { name: 'jackpot.png' });
+    const embed = createEmbed({ color: 'primary' }).setImage('attachment://jackpot.png');
+    await InteractionHelper.safeEditReply(interaction, { embeds: [embed], files: [attachment] });
 }
 
 export default {
@@ -318,6 +369,11 @@ export default {
                         .setMinValue(MIN_BET)
                         .setMaxValue(MAX_BET)
                 )
+        )
+        .addSubcommand(sub =>
+            sub
+                .setName('jackpot')
+                .setDescription('Xem số dư Jackpot hiện tại')
         ),
 
     execute: withErrorHandling(async (interaction, config, client) => {
@@ -332,6 +388,9 @@ export default {
                 break;
             case 'xocdia':
                 await handleXocDia(interaction, client);
+                break;
+            case 'jackpot':
+                await handleJackpotLookup(interaction, client);
                 break;
             default:
                 throw createError(
