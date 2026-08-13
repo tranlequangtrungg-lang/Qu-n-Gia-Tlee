@@ -1,5 +1,6 @@
 import { SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
 import { createEmbed } from '../../utils/embeds.js';
+import { getActiveTable, openTable } from '../../utils/casinoTable.js';
 import { withErrorHandling, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
