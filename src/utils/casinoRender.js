@@ -167,6 +167,41 @@ function drawStatusLine(ctx, y, text, color = '#ffffff') {
     ctx.fillText(text, WIDTH / 2, y);
 }
 
+function drawParticipantList(ctx, startY, participants, options = {}) {
+    const { maxRows = 6 } = options;
+    if (!participants || participants.length === 0) {
+        drawStatusLine(ctx, startY, 'Chưa có ai tham gia...', 'rgba(255,255,255,0.5)');
+        return;
+    }
+    const rows = participants.slice(0, maxRows);
+    ctx.font = `18px ${FONT_REGULAR}`;
+    ctx.textAlign = 'center';
+    let y = startY;
+    for (const p of rows) {
+        const sideLabel = p.side === 'tai' ? 'Tài' : 'Xỉu';
+        const sideColor = p.side === 'tai' ? '#e74c3c' : '#3498db';
+        let line = `${p.username} • ${sideLabel} • ${p.amount.toLocaleString()} Bcoin`;
+        let color = sideColor;
+        if (typeof p.won === 'boolean') {
+            line += p.won ? ` • Thắng +${p.netWinnings.toLocaleString()}` : ` • Thua -${Math.abs(p.netWinnings).toLocaleString()}`;
+            color = p.won ? '#2ecc71' : '#e74c3c';
+        }
+        ctx.fillStyle = color;
+        ctx.fillText(line, WIDTH / 2, y);
+        y += 26;
+    }
+    if (participants.length > maxRows) {
+        ctx.font = `16px ${FONT_REGULAR}`;
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.fillText(`...và ${participants.length - maxRows} người khác`, WIDTH / 2, y);
+    }
+}
+
+/**
+ * phase: 'waiting' (bàn chung đang mở cược) | 'shaking' | 'revealing' | 'result'
+ * participants (tùy chọn): mảng {username, side, amount, won?, netWinnings?} — dùng cho chế độ bàn chung.
+ * betLabel/betAmount/balanceText: dùng cho chế độ 1 người chơi cũ (không đổi hành vi cũ nếu participants không được truyền vào).
+ */
 export async function renderTaiXiuFrame({
     phase,
     revealedValues = [null, null, null],
@@ -176,6 +211,8 @@ export async function renderTaiXiuFrame({
     betAmount,
     resultInfo = null,
     balanceText = null,
+    participants = null,
+    secondsLeft = null,
 }) {
     ensureFonts();
     const canvas = createCanvas(WIDTH, HEIGHT);
@@ -196,7 +233,8 @@ export async function renderTaiXiuFrame({
             jitterX = (Math.random() - 0.5) * 10;
             jitterY = (Math.random() - 0.5) * 10;
         }
-        drawDie(ctx, dieX + jitterX, dieY + jitterY, DIE_SIZE, revealedValues[i]);
+        const value = phase === 'waiting' ? null : revealedValues[i];
+        drawDie(ctx, dieX + jitterX, dieY + jitterY, DIE_SIZE, value);
         dieX += DIE_SIZE + DIE_GAP;
     }
 
@@ -207,23 +245,35 @@ export async function renderTaiXiuFrame({
         const style = OUTCOME_STYLES[resultInfo.outcome];
         drawResultBanner(ctx, belowDiceY + 65, style.label, style.color);
 
-        const betColor = resultInfo.won ? '#2ecc71' : '#e74c3c';
-        const betText = resultInfo.won
-            ? `${betLabel} • Cược ${betAmount.toLocaleString()} • Thắng +${resultInfo.netWinnings.toLocaleString()}`
-            : `${betLabel} • Cược ${betAmount.toLocaleString()} • Thua -${betAmount.toLocaleString()}`;
-        drawStatusLine(ctx, belowDiceY + 115, betText, betColor);
-
-        if (balanceText) {
-            drawStatusLine(ctx, belowDiceY + 150, balanceText, 'rgba(255,255,255,0.6)');
+        if (participants) {
+            drawParticipantList(ctx, belowDiceY + 115, participants, { maxRows: 6 });
+        } else {
+            const betColor = resultInfo.won ? '#2ecc71' : '#e74c3c';
+            const betText = resultInfo.won
+                ? `${betLabel} • Cược ${betAmount.toLocaleString()} • Thắng +${resultInfo.netWinnings.toLocaleString()}`
+                : `${betLabel} • Cược ${betAmount.toLocaleString()} • Thua -${betAmount.toLocaleString()}`;
+            drawStatusLine(ctx, belowDiceY + 115, betText, betColor);
+            if (balanceText) {
+                drawStatusLine(ctx, belowDiceY + 150, balanceText, 'rgba(255,255,255,0.6)');
+            }
         }
+    } else if (phase === 'waiting') {
+        const countdownText = secondsLeft !== null
+            ? `⏳ Đóng cược sau ${secondsLeft} giây...`
+            : (statusText || 'Đang mở cược...');
+        drawStatusLine(ctx, belowDiceY + 10, countdownText, '#ffd700');
+        drawParticipantList(ctx, belowDiceY + 50, participants || [], { maxRows: 6 });
     } else {
         drawStatusLine(ctx, belowDiceY + 20, statusText || `${betLabel} • Cược ${betAmount.toLocaleString()}`);
+        if (participants) {
+            drawParticipantList(ctx, belowDiceY + 55, participants, { maxRows: 6 });
+        }
     }
 
     return await canvas.encode('png');
 }
 
-// ===================== XÓC ĐĨA =====================
+// ===================== XÓC ĐĨA (giữ nguyên, không đổi) =====================
 const COIN_RADIUS = 65;
 const COIN_GAP = 150;
 
