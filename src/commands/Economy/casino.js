@@ -173,7 +173,7 @@ async function handleTaiXiu(interaction, client) {
         betLabel,
         betAmount,
         resultInfo: { total: result.total, outcome: result.outcome, won, netWinnings },
-        balanceText: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}`,
+        balanceText: `Số dư hiện tại: ${freshData.wallet.toLocaleString()} Bcoin`,
     });
     await sendFrame(interaction, finalFrame, 'taixiu.png');
 
@@ -286,7 +286,7 @@ async function handleXocDia(interaction, client) {
         betLabel,
         betAmount,
         resultInfo: { redCount: result.redCount, won, netWinnings },
-        balanceText: `Số dư hiện tại: ${formatCurrency(freshData.wallet)}`,
+        balanceText: `Số dư hiện tại: ${freshData.wallet.toLocaleString()} Bcoin`,
     });
     await sendFrame(interaction, finalFrame, 'xocdia.png');
 
