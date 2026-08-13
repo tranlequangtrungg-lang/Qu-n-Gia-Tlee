@@ -373,6 +373,11 @@ export default {
         )
         .addSubcommand(sub =>
             sub
+                .setName('tx')
+                .setDescription('[THỬ NGHIỆM] Bàn Tài Xỉu chung nhiều người chơi')
+        )
+        .addSubcommand(sub =>
+            sub
                 .setName('jackpot')
                 .setDescription('Xem số dư Jackpot hiện tại')
         ),
