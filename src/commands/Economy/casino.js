@@ -407,6 +407,9 @@ export default {
             case 'xocdia':
                 await handleXocDia(interaction, client);
                 break;
+                case 'tx':
+                await handleTaiXiuPublic(interaction, client);
+                break;
             case 'jackpot':
                 await handleJackpotLookup(interaction, client);
                 break;
