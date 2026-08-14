@@ -302,6 +302,18 @@ async function handleXocDia(interaction, client) {
     });
 }
 
+async function handleTaiXiuPublic(interaction, client) {
+    const channelId = interaction.channelId;
+    const existing = await getActiveTable(client, channelId);
+    if (existing && existing.status !== 'resolved') {
+        const jumpLink = `https://discord.com/channels/${interaction.guildId}/${channelId}/${existing.messageId}`;
+        return await InteractionHelper.safeEditReply(interaction, {
+            content: `🎲 Đang có bàn Tài Xỉu mở sẵn rồi! [Bấm vào đây để tham gia](${jumpLink})`,
+        });
+    }
+    await openTable(client, interaction.channel, interaction);
+}
+
 async function handleJackpotLookup(interaction, client) {
     const guildId = interaction.guildId;
     const [taixiuJackpot, xocdiaJackpot] = await Promise.all([
