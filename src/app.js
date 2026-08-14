@@ -90,6 +90,9 @@ class TitanBot extends Client {
       startupLog('Logging into Discord...');
       await this.login(this.config.bot.token);
       startupLog('Discord login successful');
+
+      startupLog('Checking for interrupted casino tables...');
+      await recoverStaleTables(this);
       
       startupLog('Registering slash commands globally...');
       await this.registerCommands();
