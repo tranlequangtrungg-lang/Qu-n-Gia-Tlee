@@ -88,6 +88,7 @@ export const EconomyDataSchema = z
     dailyBetBudget: z.number().nonnegative().default(0),
     dailyBetTotal: z.number().nonnegative().default(0),
     dailyBetResetAt: z.number().int().nonnegative().default(0),
+    wealthTier: z.number().int().nullable().default(null),
     bankLevel: z.number().int().nonnegative().default(0),
     dailyStreak: z.number().int().nonnegative().default(0),
     lastDaily: z.number().int().nonnegative().default(0),
