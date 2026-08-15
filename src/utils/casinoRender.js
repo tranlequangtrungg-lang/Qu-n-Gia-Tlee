@@ -1,4 +1,4 @@
-import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
+import { createCanvas, GlobalFonts, loadImage } from '@napi-rs/canvas';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { logger } from './logger.js';
@@ -28,8 +28,8 @@ function ensureFonts() {
 const FONT_BOLD = 'CasinoBold, sans-serif';
 const FONT_REGULAR = 'CasinoRegular, sans-serif';
 
-const WIDTH = 900;
-const HEIGHT = 600;
+const WIDTH = 1000;
+const HEIGHT = 650;
 
 function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
@@ -68,24 +68,28 @@ function drawTitle(ctx, text) {
     ctx.fillStyle = '#d4af37';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(text, WIDTH / 2, 54);
+    ctx.fillText(text, WIDTH / 2, 50);
 }
 
 function drawJackpotBanner(ctx, jackpotAmount) {
     ctx.save();
-    ctx.font = `bold 22px ${FONT_BOLD}`;
+    ctx.font = `bold 20px ${FONT_BOLD}`;
     ctx.textAlign = 'center';
     ctx.shadowColor = '#ffd700';
-    ctx.shadowBlur = 16;
+    ctx.shadowBlur = 14;
     ctx.fillStyle = '#ffd700';
-    ctx.fillText(`💰 JACKPOT: ${jackpotAmount.toLocaleString()} Bcoin 💰`, WIDTH / 2, 90);
+    ctx.fillText(`💰 JACKPOT: ${jackpotAmount.toLocaleString()} Bcoin 💰`, WIDTH / 2, 80);
     ctx.restore();
 }
 
-// ===================== XÚC XẮC =====================
-const DIE_SIZE = 180;
-const DIE_GAP = 45;
+function drawStatusLine(ctx, y, text, color = '#ffffff') {
+    ctx.font = `20px ${FONT_REGULAR}`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.fillText(text, WIDTH / 2, y);
+}
 
+// ===================== XÚC XẮC =====================
 const PIP_LAYOUTS = {
     1: [[0.5, 0.5]],
     2: [[0.27, 0.27], [0.73, 0.73]],
@@ -98,8 +102,8 @@ const PIP_LAYOUTS = {
 function drawDie(ctx, x, y, size, value) {
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.6)';
-    ctx.shadowBlur = 20;
-    ctx.shadowOffsetY = 10;
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 8;
 
     const gradient = ctx.createLinearGradient(x, y, x + size, y + size);
     gradient.addColorStop(0, '#3a3a3a');
@@ -146,72 +150,140 @@ function drawDie(ctx, x, y, size, value) {
 const OUTCOME_STYLES = {
     tai: { label: 'TÀI', color: '#e74c3c' },
     xiu: { label: 'XỈU', color: '#3498db' },
-    bao: { label: 'BÃO', color: '#f1c40f' },
 };
 
 function drawResultBanner(ctx, y, label, color) {
     ctx.save();
-    ctx.font = `bold 60px ${FONT_BOLD}`;
+    ctx.font = `bold 52px ${FONT_BOLD}`;
     ctx.textAlign = 'center';
     ctx.shadowColor = color;
-    ctx.shadowBlur = 35;
+    ctx.shadowBlur = 30;
     ctx.fillStyle = color;
     ctx.fillText(label, WIDTH / 2, y);
     ctx.restore();
 }
 
-function drawStatusLine(ctx, y, text, color = '#ffffff') {
-    ctx.font = `22px ${FONT_REGULAR}`;
-    ctx.fillStyle = color;
-    ctx.textAlign = 'center';
-    ctx.fillText(text, WIDTH / 2, y);
+// ===================== BÀN CHUNG — LAYOUT 2 CỘT + AVATAR =====================
+const DICE_SIZE = 110;
+const DICE_GAP = 24;
+const PANEL_WIDTH = 260;
+const PANEL_X_TAI = 20;
+const PANEL_X_XIU = WIDTH - PANEL_WIDTH - 20;
+const PANEL_TOP = 150;
+const PANEL_HEIGHT = 420;
+const AVATAR_SIZE = 32;
+const ROW_HEIGHT = 46;
+const MAX_ROWS_PER_SIDE = 7;
+
+const avatarCache = new Map();
+async function loadAvatarImage(url) {
+    if (!url) return null;
+    if (avatarCache.has(url)) return avatarCache.get(url);
+    try {
+        const img = await loadImage(url);
+        if (avatarCache.size > 200) {
+            avatarCache.delete(avatarCache.keys().next().value);
+        }
+        avatarCache.set(url, img);
+        return img;
+    } catch (error) {
+        logger.warn('[CASINO_RENDER] Không tải được avatar', { url, error: error.message });
+        return null;
+    }
 }
 
-function drawParticipantList(ctx, startY, participants, options = {}) {
-    const { maxRows = 6 } = options;
-    if (!participants || participants.length === 0) {
-        drawStatusLine(ctx, startY, 'Chưa có ai tham gia...', 'rgba(255,255,255,0.5)');
-        return;
+function truncateText(ctx, text, maxWidth) {
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    let truncated = text;
+    while (truncated.length > 1 && ctx.measureText(truncated + '…').width > maxWidth) {
+        truncated = truncated.slice(0, -1);
     }
-    const rows = participants.slice(0, maxRows);
-    ctx.font = `18px ${FONT_REGULAR}`;
+    return truncated + '…';
+}
+
+async function drawSidePanel(ctx, { x, label, color, participants, includeResult }) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    roundRect(ctx, x, PANEL_TOP, PANEL_WIDTH, PANEL_HEIGHT, 18);
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    roundRect(ctx, x, PANEL_TOP, PANEL_WIDTH, PANEL_HEIGHT, 18);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.font = `bold 22px ${FONT_BOLD}`;
     ctx.textAlign = 'center';
-    let y = startY;
-    for (const p of rows) {
-        const sideLabel = p.side === 'tai' ? 'Tài' : 'Xỉu';
-        const sideColor = p.side === 'tai' ? '#e74c3c' : '#3498db';
-        let line = `${p.username} • ${sideLabel} • ${p.amount.toLocaleString()} Bcoin`;
-        let color = sideColor;
-        if (typeof p.won === 'boolean') {
-            line += p.won ? ` • Thắng +${p.netWinnings.toLocaleString()}` : ` • Thua -${Math.abs(p.netWinnings).toLocaleString()}`;
-            color = p.won ? '#2ecc71' : '#e74c3c';
+    ctx.fillStyle = color;
+    ctx.fillText(label, x + PANEL_WIDTH / 2, PANEL_TOP + 32);
+
+    const totalAmount = participants.reduce((s, p) => s + p.amount, 0);
+    ctx.font = `13px ${FONT_REGULAR}`;
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText(`👤 ${participants.length}  •  🪙 ${totalAmount.toLocaleString()}`, x + PANEL_WIDTH / 2, PANEL_TOP + 52);
+
+    let rowY = PANEL_TOP + 74;
+    const shown = participants.slice(0, MAX_ROWS_PER_SIDE);
+    for (const p of shown) {
+        const avatarX = x + 20;
+        const img = await loadAvatarImage(p.avatarURL);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(avatarX + AVATAR_SIZE / 2, rowY + AVATAR_SIZE / 2, AVATAR_SIZE / 2, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        if (img) {
+            ctx.drawImage(img, avatarX, rowY, AVATAR_SIZE, AVATAR_SIZE);
+        } else {
+            ctx.fillStyle = '#555555';
+            ctx.fillRect(avatarX, rowY, AVATAR_SIZE, AVATAR_SIZE);
         }
-        ctx.fillStyle = color;
-        ctx.fillText(line, WIDTH / 2, y);
-        y += 26;
+        ctx.restore();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(avatarX + AVATAR_SIZE / 2, rowY + AVATAR_SIZE / 2, AVATAR_SIZE / 2, 0, Math.PI * 2);
+        ctx.stroke();
+
+        const nameX = avatarX + AVATAR_SIZE + 10;
+        ctx.textAlign = 'left';
+        ctx.font = `bold 14px ${FONT_REGULAR}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(truncateText(ctx, p.username, PANEL_WIDTH - AVATAR_SIZE - 40), nameX, rowY + 14);
+
+        ctx.font = `13px ${FONT_REGULAR}`;
+        if (includeResult && typeof p.won === 'boolean') {
+            ctx.fillStyle = p.won ? '#2ecc71' : '#e74c3c';
+            const sign = p.won ? '+' : '-';
+            ctx.fillText(`${p.amount.toLocaleString()} (${sign}${Math.abs(p.netWinnings).toLocaleString()})`, nameX, rowY + 30);
+        } else {
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.fillText(`${p.amount.toLocaleString()} Bcoin`, nameX, rowY + 30);
+        }
+
+        rowY += ROW_HEIGHT;
     }
-    if (participants.length > maxRows) {
-        ctx.font = `16px ${FONT_REGULAR}`;
-        ctx.fillStyle = 'rgba(255,255,255,0.6)';
-        ctx.fillText(`...và ${participants.length - maxRows} người khác`, WIDTH / 2, y);
+
+    if (participants.length > shown.length) {
+        ctx.font = `12px ${FONT_REGULAR}`;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.textAlign = 'center';
+        ctx.fillText(`...và ${participants.length - shown.length} người khác`, x + PANEL_WIDTH / 2, rowY + 6);
     }
 }
 
 /**
- * phase: 'waiting' (bàn chung đang mở cược) | 'shaking' | 'revealing' | 'result'
- * participants (tùy chọn): mảng {username, side, amount, won?, netWinnings?} — dùng cho chế độ bàn chung.
- * betLabel/betAmount/balanceText: dùng cho chế độ 1 người chơi cũ (không đổi hành vi cũ nếu participants không được truyền vào).
+ * phase: 'waiting' | 'shaking' | 'revealing' | 'result'
+ * participants: mảng {username, avatarURL, side, amount, won?, netWinnings?}
  */
 export async function renderTaiXiuFrame({
     phase,
     revealedValues = [null, null, null],
     statusText = '',
     jackpotAmount = 0,
-    betLabel,
-    betAmount,
     resultInfo = null,
-    balanceText = null,
-    participants = null,
+    participants = [],
     secondsLeft = null,
 }) {
     ensureFonts();
@@ -222,52 +294,40 @@ export async function renderTaiXiuFrame({
     drawTitle(ctx, 'TÀI XỈU');
     drawJackpotBanner(ctx, jackpotAmount);
 
-    const totalDiceWidth = DIE_SIZE * 3 + DIE_GAP * 2;
+    const taiParticipants = participants.filter(p => p.side === 'tai');
+    const xiuParticipants = participants.filter(p => p.side === 'xiu');
+
+    await drawSidePanel(ctx, { x: PANEL_X_TAI, label: 'TÀI', color: '#e74c3c', participants: taiParticipants, includeResult: phase === 'result' });
+    await drawSidePanel(ctx, { x: PANEL_X_XIU, label: 'XỈU', color: '#3498db', participants: xiuParticipants, includeResult: phase === 'result' });
+
+    const totalDiceWidth = DICE_SIZE * 3 + DICE_GAP * 2;
     let dieX = (WIDTH - totalDiceWidth) / 2;
-    const dieY = 130;
+    const dieY = 210;
 
     for (let i = 0; i < 3; i++) {
-        let jitterX = 0;
-        let jitterY = 0;
+        let jitterX = 0, jitterY = 0;
         if (phase === 'shaking') {
-            jitterX = (Math.random() - 0.5) * 10;
-            jitterY = (Math.random() - 0.5) * 10;
+            jitterX = (Math.random() - 0.5) * 8;
+            jitterY = (Math.random() - 0.5) * 8;
         }
         const value = phase === 'waiting' ? null : revealedValues[i];
-        drawDie(ctx, dieX + jitterX, dieY + jitterY, DIE_SIZE, value);
-        dieX += DIE_SIZE + DIE_GAP;
+        drawDie(ctx, dieX + jitterX, dieY + jitterY, DICE_SIZE, value);
+        dieX += DICE_SIZE + DICE_GAP;
     }
 
-    const belowDiceY = dieY + DIE_SIZE + 55;
+    const belowDiceY = dieY + DICE_SIZE + 45;
 
     if (phase === 'result' && resultInfo) {
         drawStatusLine(ctx, belowDiceY, `Tổng điểm: ${resultInfo.total}`);
         const style = OUTCOME_STYLES[resultInfo.outcome];
-        drawResultBanner(ctx, belowDiceY + 65, style.label, style.color);
-
-        if (participants) {
-            drawParticipantList(ctx, belowDiceY + 115, participants, { maxRows: 6 });
-        } else {
-            const betColor = resultInfo.won ? '#2ecc71' : '#e74c3c';
-            const betText = resultInfo.won
-                ? `${betLabel} • Cược ${betAmount.toLocaleString()} • Thắng +${resultInfo.netWinnings.toLocaleString()}`
-                : `${betLabel} • Cược ${betAmount.toLocaleString()} • Thua -${betAmount.toLocaleString()}`;
-            drawStatusLine(ctx, belowDiceY + 115, betText, betColor);
-            if (balanceText) {
-                drawStatusLine(ctx, belowDiceY + 150, balanceText, 'rgba(255,255,255,0.6)');
-            }
-        }
+        drawResultBanner(ctx, belowDiceY + 55, style.label, style.color);
     } else if (phase === 'waiting') {
         const countdownText = secondsLeft !== null
             ? `⏳ Đóng cược sau ${secondsLeft} giây...`
             : (statusText || 'Đang mở cược...');
-        drawStatusLine(ctx, belowDiceY + 10, countdownText, '#ffd700');
-        drawParticipantList(ctx, belowDiceY + 50, participants || [], { maxRows: 6 });
+        drawStatusLine(ctx, belowDiceY + 20, countdownText, '#ffd700');
     } else {
-        drawStatusLine(ctx, belowDiceY + 20, statusText || `${betLabel} • Cược ${betAmount.toLocaleString()}`);
-        if (participants) {
-            drawParticipantList(ctx, belowDiceY + 55, participants, { maxRows: 6 });
-        }
+        drawStatusLine(ctx, belowDiceY + 20, statusText || '');
     }
 
     return await canvas.encode('png');
@@ -328,7 +388,7 @@ export async function renderXocDiaFrame({
     balanceText = null,
 }) {
     ensureFonts();
-    const canvas = createCanvas(WIDTH, HEIGHT);
+    const canvas = createCanvas(1000, 650);
     const ctx = canvas.getContext('2d');
 
     drawBackground(ctx);
@@ -336,12 +396,11 @@ export async function renderXocDiaFrame({
     drawJackpotBanner(ctx, jackpotAmount);
 
     const totalWidth = COIN_GAP * 3;
-    let coinX = (WIDTH - totalWidth) / 2;
+    let coinX = (1000 - totalWidth) / 2;
     const coinY = 200;
 
     for (let i = 0; i < 4; i++) {
-        let jitterX = 0;
-        let jitterY = 0;
+        let jitterX = 0, jitterY = 0;
         if (phase === 'shaking') {
             jitterX = (Math.random() - 0.5) * 10;
             jitterY = (Math.random() - 0.5) * 10;
@@ -376,7 +435,7 @@ export async function renderXocDiaFrame({
 
 export async function renderJackpotCard({ taixiuJackpot, xocdiaJackpot }) {
     ensureFonts();
-    const canvas = createCanvas(WIDTH, 320);
+    const canvas = createCanvas(900, 320);
     const ctx = canvas.getContext('2d');
 
     drawBackground(ctx);
@@ -385,8 +444,8 @@ export async function renderJackpotCard({ taixiuJackpot, xocdiaJackpot }) {
     ctx.font = `bold 30px ${FONT_BOLD}`;
     ctx.fillStyle = '#ffd700';
     ctx.textAlign = 'center';
-    ctx.fillText(`Tài Xỉu: ${taixiuJackpot.toLocaleString()} Bcoin`, WIDTH / 2, 160);
-    ctx.fillText(`Xóc Đĩa: ${xocdiaJackpot.toLocaleString()} Bcoin`, WIDTH / 2, 220);
+    ctx.fillText(`Tài Xỉu: ${taixiuJackpot.toLocaleString()} Bcoin`, 450, 160);
+    ctx.fillText(`Xóc Đĩa: ${xocdiaJackpot.toLocaleString()} Bcoin`, 450, 220);
 
     return await canvas.encode('png');
 }
