@@ -24,7 +24,7 @@ const SHAKE_DELAY_MS = 600;
 const DIE_REVEAL_DELAY_MS = 2000;
 const TAI_XIU_RETURN_MULTIPLIER = 2;
 
-const timers = new Map(); // channelId -> { mid, close, resolve }
+const timers = new Map();
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -131,6 +131,7 @@ export async function placeBet(client, guildId, channelId, user, side, amount) {
 
         table.participants[user.id] = {
             username: user.username,
+            avatarURL: user.displayAvatarURL({ extension: 'png', size: 64 }),
             side,
             amount,
             taxRate,
@@ -218,7 +219,7 @@ async function closeBetting(client, channelId) {
 
 export async function resolveTable(client, channelId) {
     const table = await getTableRaw(client, channelId);
-    if (!table || table.status === 'resolved') return;
+    if (!table) return;
 
     const channel = await client.channels.fetch(channelId).catch(() => null);
     if (!channel) {
@@ -277,7 +278,7 @@ export async function resolveTable(client, channelId) {
         }
 
         if (won) winners.push({ userId, ...p });
-        resultsList.push({ userId, username: p.username, side: p.side, amount: p.amount, won, netWinnings });
+        resultsList.push({ userId, username: p.username, avatarURL: p.avatarURL, side: p.side, amount: p.amount, won, netWinnings });
     }
 
     const explosion = await rollJackpotExplosion(client, table.guildId, 'taixiu');
@@ -325,7 +326,7 @@ export async function openTable(client, channel, interaction = null) {
     const guildId = channel.guildId;
 
     const existing = await getTableRaw(client, channelId);
-    if (existing && existing.status !== 'resolved') {
+    if (existing) {
         return existing;
     }
 
@@ -382,14 +383,28 @@ export async function recoverStaleTables(client) {
 
         for (const key of keys) {
             const table = await client.db.get(key, null);
-            if (!table || table.status === 'resolved') continue;
-
+            if (!table) continue;
+            const channelId = table.channelId;
             const entries = Object.entries(table.participants || {});
-            const lines = entries.length > 0
-                ? entries.map(([userId, p]) => `<@${userId}> (${p.username}) — ${p.side === 'tai' ? 'Tài' : 'Xỉu'} — ${p.amount.toLocaleString()} Bcoin`).join('\n')
-                : '(không có người tham gia)';
 
-            const content = `⚠️ **Bàn Tài Xỉu bị gián đoạn do bot khởi động lại** (kênh <#${table.channelId}>)\nCần hoàn tiền thủ công cho:\n${lines}`;
+            if (table.status === 'closed') {
+                logger.warn(`[CASINO_TABLE] Bàn đã đóng cược dở dang, tự động mở bát: ${key}`);
+                await resolveTable(client, channelId);
+                continue;
+            }
+
+            for (const [userId, p] of entries) {
+                try {
+                    await addMoney(client, table.guildId, userId, p.amount, 'taixiu_table_refund');
+                } catch (error) {
+                    logger.error(`[CASINO_TABLE] Hoàn tiền thất bại cho ${userId}`, error);
+                }
+            }
+
+            const lines = entries.length > 0
+                ? entries.map(([userId, p]) => `<@${userId}> (${p.username}) — hoàn ${p.amount.toLocaleString()} Bcoin`).join('\n')
+                : '(không có người tham gia)';
+            const content = `♻️ **Bàn Tài Xỉu bị gián đoạn lúc đang mở cược** (kênh <#${channelId}>)\nĐã tự động hoàn tiền cho:\n${lines}`;
 
             for (const ownerId of owners) {
                 try {
@@ -400,8 +415,8 @@ export async function recoverStaleTables(client) {
                 }
             }
 
-            await client.db.delete(key).catch(() => {});
-            logger.warn(`[CASINO_TABLE] Đã dọn bàn dở dang: ${key}`);
+            await deleteTableRaw(client, channelId);
+            logger.warn(`[CASINO_TABLE] Đã hoàn tiền và dọn bàn dở dang: ${key}`);
         }
     } catch (error) {
         logger.error('[CASINO_TABLE] recoverStaleTables error', error);
