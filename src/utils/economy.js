@@ -4,6 +4,7 @@ import { getColor, getEconomyKey as getEconomyStorageKey } from './database.js';
 import { BotConfig } from '../config/bot.js';
 import { normalizeEconomyData } from './schemas.js';
 import { logger } from './logger.js';
+import { getWealthTier, syncWealthRole } from './wealthRoles.js';
 import { validateDiscordId, validateNumber } from './validation.js';
 import { DEFAULT_ECONOMY_DATA } from './constants.js';
 import { createError, ErrorTypes, wrapServiceBoundary } from './errorHandler.js';
@@ -139,9 +140,23 @@ export async function setEconomyData(client, guildId, userId, data) {
         if (!client.db || typeof client.db.set !== 'function') {
             throw new Error('Database not available');
         }
-
         const key = getEconomyKey(guildId, userId);
         const normalized = normalizeEconomyData(data, DEFAULT_ECONOMY_DATA);
+
+        // Đồng bộ role bậc tài sản — chỉ gọi Discord API khi bậc thực sự đổi, không mỗi lần lưu ví.
+        try {
+            const totalWealth = (normalized.wallet || 0) + (normalized.bank || 0);
+            const newTier = getWealthTier(totalWealth);
+            if (newTier !== normalized.wealthTier) {
+                normalized.wealthTier = newTier;
+                syncWealthRole(client, guildId, userId, newTier).catch(err =>
+                    logger.error(`[WEALTH_ROLE] sync error for ${userId}`, err)
+                );
+            }
+        } catch (wealthError) {
+            logger.error('[WEALTH_ROLE] tier check error', wealthError);
+        }
+
         await client.db.set(key, normalized);
         return true;
     } catch (error) {
