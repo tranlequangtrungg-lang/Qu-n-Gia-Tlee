@@ -23,11 +23,19 @@ const SHAKE_FRAMES = 2;
 const SHAKE_DELAY_MS = 600;
 const DIE_REVEAL_DELAY_MS = 2000;
 const TAI_XIU_RETURN_MULTIPLIER = 2;
+const MESSAGE_EDIT_TIMEOUT_MS = 6000;
 
 const timers = new Map();
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function withTimeout(promise, ms, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout: ${label} quá ${ms}ms`)), ms))
+    ]);
 }
 
 function shuffle(array) {
@@ -86,18 +94,23 @@ export async function getActiveTable(client, channelId) {
     return await getTableRaw(client, channelId);
 }
 
-async function editMessageWithFrame(message, frame, filename, components = []) {
+// Sửa tin nhắn có giới hạn thời gian chờ — treo/lỗi mạng thì bỏ qua (chỉ ghi log), KHÔNG chặn phần trả tiền phía sau.
+async function editMessageWithFrame(message, frame, filename, embedDescription, components = []) {
     try {
         const attachment = new AttachmentBuilder(frame, { name: filename });
-        const embed = createEmbed({ color: 'primary' }).setImage(`attachment://${filename}`);
-        await message.edit({ embeds: [embed], files: [attachment], components });
+        const embed = createEmbed({ color: 'primary', description: embedDescription }).setImage(`attachment://${filename}`);
+        await withTimeout(
+            message.edit({ embeds: [embed], files: [attachment], components }),
+            MESSAGE_EDIT_TIMEOUT_MS,
+            'message.edit'
+        );
     } catch (error) {
-        logger.error('[CASINO_TABLE] editMessageWithFrame failed', error);
+        logger.error('[CASINO_TABLE] editMessageWithFrame failed/timeout — bỏ qua, không chặn tiếp theo', { error: error.message });
     }
 }
 
 export async function placeBet(client, guildId, channelId, user, side, amount) {
-    return await withEconomyLock(guildId, `table:${channelId}`, async () => {
+    const result = await withEconomyLock(guildId, `table:${channelId}`, async () => {
         const table = await getTableRaw(client, channelId);
         if (!table || table.status !== 'open' || Date.now() >= table.closesAt) {
             return { ok: false, message: 'Bàn đã đóng cược, chờ ván sau nhé!' };
@@ -138,27 +151,28 @@ export async function placeBet(client, guildId, channelId, user, side, amount) {
         };
         await setTableRaw(client, channelId, table);
 
-        return { ok: true };
+        return { ok: true, table };
     });
+
+    // Vẽ lại ảnh ngay khi có người mới cược — không đợi mốc thời gian cố định nữa.
+    if (result.ok) {
+        refreshWaitingFrame(client, channelId).catch(err => logger.error('[CASINO_TABLE] refresh on join error', err));
+    }
+
+    return result;
 }
 
 function scheduleTimers(client, table) {
     const channelId = table.channelId;
     if (timers.has(channelId)) {
         const t = timers.get(channelId);
-        clearTimeout(t.mid);
         clearTimeout(t.close);
         clearTimeout(t.resolve);
     }
 
-    const midDelay = Math.max(0, table.openedAt + Math.floor(OPEN_DURATION_MS / 2) - Date.now());
     const closeDelay = Math.max(0, table.closesAt - Date.now());
     const resolveDelay = Math.max(0, table.resolvesAt - Date.now());
 
-    const midTimer = setTimeout(
-        () => refreshWaitingFrame(client, channelId).catch(err => logger.error('[CASINO_TABLE] mid refresh error', err)),
-        midDelay
-    );
     const closeTimer = setTimeout(
         () => closeBetting(client, channelId).catch(err => logger.error('[CASINO_TABLE] close error', err)),
         closeDelay
@@ -168,7 +182,7 @@ function scheduleTimers(client, table) {
         resolveDelay
     );
 
-    timers.set(channelId, { mid: midTimer, close: closeTimer, resolve: resolveTimer });
+    timers.set(channelId, { close: closeTimer, resolve: resolveTimer });
 }
 
 async function refreshWaitingFrame(client, channelId) {
@@ -179,15 +193,18 @@ async function refreshWaitingFrame(client, channelId) {
     const message = await channel.messages.fetch(table.messageId).catch(() => null);
     if (!message) return;
 
-    const secondsLeft = Math.max(0, Math.ceil((table.closesAt - Date.now()) / 1000));
     const jackpotAmount = await getJackpot(client, table.guildId, 'taixiu');
+    const closesAtUnix = Math.floor(table.closesAt / 1000);
     const frame = await renderTaiXiuFrame({
         phase: 'waiting',
         jackpotAmount,
         participants: Object.values(table.participants),
-        secondsLeft,
     });
-    await editMessageWithFrame(message, frame, 'taixiu.png', message.components);
+    await editMessageWithFrame(
+        message, frame, 'taixiu.png',
+        `⏳ Đóng cược <t:${closesAtUnix}:R>`,
+        message.components
+    );
 }
 
 async function closeBetting(client, channelId) {
@@ -207,14 +224,13 @@ async function closeBetting(client, channelId) {
         statusText: 'Đã đóng cược! Chuẩn bị mở bát...',
         jackpotAmount,
         participants: Object.values(table.participants),
-        secondsLeft: 0,
     });
 
     const disabledRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`taixiu_bet:tai:${channelId}`).setLabel('TÀI').setStyle(ButtonStyle.Danger).setDisabled(true),
         new ButtonBuilder().setCustomId(`taixiu_bet:xiu:${channelId}`).setLabel('XỈU').setStyle(ButtonStyle.Primary).setDisabled(true),
     );
-    await editMessageWithFrame(message, frame, 'taixiu.png', [disabledRow]);
+    await editMessageWithFrame(message, frame, 'taixiu.png', '🔒 Đã đóng cược', [disabledRow]);
 }
 
 export async function resolveTable(client, channelId) {
@@ -238,7 +254,7 @@ export async function resolveTable(client, channelId) {
             jackpotAmount: await getJackpot(client, table.guildId, 'taixiu'),
             participants: participantEntries.map(([, p]) => p),
         });
-        if (message) await editMessageWithFrame(message, frame, 'taixiu.png');
+        if (message) await editMessageWithFrame(message, frame, 'taixiu.png', '🎲 Đang lắc bát...');
         await sleep(SHAKE_DELAY_MS);
     }
 
@@ -254,10 +270,11 @@ export async function resolveTable(client, channelId) {
             jackpotAmount: await getJackpot(client, table.guildId, 'taixiu'),
             participants: participantEntries.map(([, p]) => p),
         });
-        if (message) await editMessageWithFrame(message, frame, 'taixiu.png');
+        if (message) await editMessageWithFrame(message, frame, 'taixiu.png', '🥣 Đang mở bát...');
         await sleep(DIE_REVEAL_DELAY_MS);
     }
 
+    // ===== Trả tiền — KHÔNG bọc timeout, luôn phải chạy xong dù chậm =====
     let jackpotAmount = await getJackpot(client, table.guildId, 'taixiu');
     const winners = [];
     const resultsList = [];
@@ -294,6 +311,7 @@ export async function resolveTable(client, channelId) {
         }
         jackpotAmount = 0;
     }
+    // ===== Hết phần trả tiền =====
 
     const finalFrame = await renderTaiXiuFrame({
         phase: 'result',
@@ -302,7 +320,7 @@ export async function resolveTable(client, channelId) {
         resultInfo: { total: result.total, outcome: result.outcome },
         participants: resultsList,
     });
-    if (message) await editMessageWithFrame(message, finalFrame, 'taixiu.png');
+    if (message) await editMessageWithFrame(message, finalFrame, 'taixiu.png', '✅ Đã trả kết quả');
 
     if (jackpotSplits.length > 0) {
         const lines = jackpotSplits.map(s => `<@${s.userId}> nhận **${s.share.toLocaleString()} Bcoin**`).join('\n');
@@ -333,17 +351,17 @@ export async function openTable(client, channel, interaction = null) {
     const now = Date.now();
     const closesAt = now + OPEN_DURATION_MS;
     const resolvesAt = now + TOTAL_DURATION_MS;
+    const closesAtUnix = Math.floor(closesAt / 1000);
 
     const jackpotAmount = await getJackpot(client, guildId, 'taixiu');
     const frame = await renderTaiXiuFrame({
         phase: 'waiting',
         jackpotAmount,
         participants: [],
-        secondsLeft: Math.ceil(OPEN_DURATION_MS / 1000),
     });
 
     const attachment = new AttachmentBuilder(frame, { name: 'taixiu.png' });
-    const embed = createEmbed({ color: 'primary' }).setImage('attachment://taixiu.png');
+    const embed = createEmbed({ color: 'primary', description: `⏳ Đóng cược <t:${closesAtUnix}:R>` }).setImage('attachment://taixiu.png');
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`taixiu_bet:tai:${channelId}`).setLabel('TÀI').setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId(`taixiu_bet:xiu:${channelId}`).setLabel('XỈU').setStyle(ButtonStyle.Primary),
