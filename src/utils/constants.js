@@ -6,6 +6,7 @@ export const DEFAULT_ECONOMY_DATA = {
     dailyBetBudget: 0,
     dailyBetTotal: 0,
     dailyBetResetAt: 0,
+    wealthTier: null,
     bankLevel: 0,
     xp: 0,
     level: 1,
