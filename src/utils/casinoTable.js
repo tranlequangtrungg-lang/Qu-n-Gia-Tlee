@@ -288,7 +288,7 @@ export async function resolveTable(client, channelId) {
         const netWinnings = won ? netPayout - p.amount : -p.amount;
 
         if (netPayout > 0) {
-            await addMoney(client, table.guildId, userId, netPayout, 'taixiu_table_win');
+            await addMoney(client, table.guildId, userId, netPayout);
         }
         if (taxAmount > 0) {
             jackpotAmount = await addToJackpot(client, table.guildId, 'taixiu', taxAmount);
@@ -305,7 +305,7 @@ export async function resolveTable(client, channelId) {
         for (const w of winners) {
             const share = totalWinningBet > 0 ? Math.floor(explosion.amount * (w.amount / totalWinningBet)) : 0;
             if (share > 0) {
-                await addMoney(client, table.guildId, w.userId, share, 'taixiu_jackpot_split');
+                await addMoney(client, table.guildId, w.userId, share);
                 jackpotSplits.push({ userId: w.userId, share });
             }
         }
@@ -413,7 +413,7 @@ export async function recoverStaleTables(client) {
 
             for (const [userId, p] of entries) {
                 try {
-                    await addMoney(client, table.guildId, userId, p.amount, 'taixiu_table_refund');
+                    await addMoney(client, table.guildId, userId, p.amount);
                 } catch (error) {
                     logger.error(`[CASINO_TABLE] Hoàn tiền thất bại cho ${userId}`, error);
                 }
