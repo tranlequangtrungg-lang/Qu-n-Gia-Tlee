@@ -25,6 +25,13 @@ function ensureFonts() {
     }
 }
 
+function withTimeout(promise, ms, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout: ${label} quá ${ms}ms`)), ms))
+    ]);
+}
+
 const FONT_BOLD = 'CasinoBold, sans-serif';
 const FONT_REGULAR = 'CasinoRegular, sans-serif';
 
@@ -163,7 +170,7 @@ function drawResultBanner(ctx, y, label, color) {
     ctx.restore();
 }
 
-// ===================== BÀN CHUNG — LAYOUT 2 CỘT + AVATAR =====================
+// ===================== BÀN CHUNG — LAYOUT 2 CỘT + AVATAR (có timeout) =====================
 const DICE_SIZE = 110;
 const DICE_GAP = 24;
 const PANEL_WIDTH = 260;
@@ -174,20 +181,21 @@ const PANEL_HEIGHT = 420;
 const AVATAR_SIZE = 32;
 const ROW_HEIGHT = 46;
 const MAX_ROWS_PER_SIDE = 7;
+const AVATAR_LOAD_TIMEOUT_MS = 4000;
 
 const avatarCache = new Map();
 async function loadAvatarImage(url) {
     if (!url) return null;
     if (avatarCache.has(url)) return avatarCache.get(url);
     try {
-        const img = await loadImage(url);
+        const img = await withTimeout(loadImage(url), AVATAR_LOAD_TIMEOUT_MS, `loadAvatar(${url})`);
         if (avatarCache.size > 200) {
             avatarCache.delete(avatarCache.keys().next().value);
         }
         avatarCache.set(url, img);
         return img;
     } catch (error) {
-        logger.warn('[CASINO_RENDER] Không tải được avatar', { url, error: error.message });
+        logger.warn('[CASINO_RENDER] Không tải được avatar (bỏ qua, dùng hình mặc định)', { url, error: error.message });
         return null;
     }
 }
@@ -284,7 +292,6 @@ export async function renderTaiXiuFrame({
     jackpotAmount = 0,
     resultInfo = null,
     participants = [],
-    secondsLeft = null,
 }) {
     ensureFonts();
     const canvas = createCanvas(WIDTH, HEIGHT);
@@ -322,10 +329,7 @@ export async function renderTaiXiuFrame({
         const style = OUTCOME_STYLES[resultInfo.outcome];
         drawResultBanner(ctx, belowDiceY + 55, style.label, style.color);
     } else if (phase === 'waiting') {
-        const countdownText = secondsLeft !== null
-            ? `⏳ Đóng cược sau ${secondsLeft} giây...`
-            : (statusText || 'Đang mở cược...');
-        drawStatusLine(ctx, belowDiceY + 20, countdownText, '#ffd700');
+        drawStatusLine(ctx, belowDiceY + 20, statusText || 'Đang mở cược...', '#ffd700');
     } else {
         drawStatusLine(ctx, belowDiceY + 20, statusText || '');
     }
