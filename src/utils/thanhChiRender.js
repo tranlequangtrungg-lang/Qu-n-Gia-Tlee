@@ -110,15 +110,17 @@ export async function renderThanhChi({ avatarURL, displayName, lyDo, thoiGianTex
     const maxTextWidth = WIDTH * 0.72;
 
     // Đoạn trên
-    const topText = `TRUYỀN LỆNH!\nTội đồ ${displayName} vào giờ ${gioDiaChi}, ngày mùng ${ngayAm} tháng ${thangAm} năm ${canChiNam}, đã phạm tội ${lyDo}.`;
-    ctx.fillStyle = '#3a1a12';
-    ctx.font = `bold 32px ${FONT_BOLD}`;
-    ctx.textAlign = 'center';
-    ctx.fillText('TRUYỀN LỆNH!', WIDTH / 2, 192);
+    const topText = TRUYỀN LỆNH!\nTội đồ ${displayName} vào giờ ${gioDiaChi}, ngày mùng ${ngayAm} tháng ${thangAm} năm ${canChiNam}, đã phạm tội ${lyDo}.;
 
-    const bodyTop = `Tội đồ ${displayName} vào giờ ${gioDiaChi}, ngày mùng ${ngayAm} tháng ${thangAm} năm ${canChiNam}, đã phạm tội ${lyDo}.`;
-    const fitTop = fitText(ctx, bodyTop, maxTextWidth, 3, [34, 30, 26, 22, 20], FONT_REGULAR);
-    ctx.font = `${fitTop.fontSize}px ${FONT_REGULAR}`;
+        ctx.font = bold 32px ${FONT_BOLD};
+
+    const bodyTop = Tội đồ ${displayName} vào giờ ${gioDiaChi}, ngày mùng ${ngayAm} tháng ${thangAm} năm ${canChiNam}, đã phạm tội ${lyDo}.;
+
+        ctx.font = ${fitTop.fontSize}px ${FONT_REGULAR};
+
+    const bodyBottom = Tang vật đã tịch thu đầy đủ.\nTuyên phạt đày đi khổ sai ${thoiGianText}.\nThi hành hình phạt ngay lập tức!;
+
+        ctx.font = ${fitBottom.fontSize}px ${FONT_REGULAR};
     drawCenteredLines(ctx, fitTop.lines, WIDTH / 2, 244, fitTop.fontSize * 1.35);
 
     // Avatar tròn
