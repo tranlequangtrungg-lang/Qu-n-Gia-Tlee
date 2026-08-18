@@ -12,8 +12,6 @@ import {
 } from './musicEmbeds.js';
 import { refreshPlayerMessage } from './playerHandler.js';
 
-const YOUTUBE_URL_PATTERN = /(?:youtube\.com|youtu\.be)/i;
-
 export function getPlayer(client, guildId) {
     return client.riffy?.players?.get(guildId) || null;
 }
@@ -118,14 +116,6 @@ export async function joinVoiceChannel(client, interaction) {
 }
 
 export async function playQuery(client, interaction, query) {
-    if (YOUTUBE_URL_PATTERN.test(query)) {
-        throw new TitanBotError(
-            'YouTube URL blocked',
-            ErrorTypes.USER_INPUT,
-            'YouTube links are not supported. Try a song name instead.',
-        );
-    }
-
     const { player, guildData } = await ensurePlayer(client, interaction);
 
     const result = await client.riffy.resolve({
