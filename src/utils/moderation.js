@@ -22,6 +22,8 @@ const ACTION_TO_EVENT_TYPE = {
   'Log Filter Updated': EVENT_TYPES.MODERATION_CONFIG,
   'Case Created': EVENT_TYPES.MODERATION_CONFIG,
   'Case Updated': EVENT_TYPES.MODERATION_CONFIG,
+  'Mute Role Added': EVENT_TYPES.MODERATION_CONFIG,
+  'Mute Role Removed': EVENT_TYPES.MODERATION_CONFIG,
 };
 
 function buildModerationLogData(event) {
@@ -196,4 +198,48 @@ export async function logModerationAction({ client, guild, event }) {
   });
   
   return caseId;
+}
+
+// =========================
+// MUTE ROLES (custom roles allowed to use /timeout without ModerateMembers)
+// =========================
+
+function muteRolesKey(guildId) {
+  return `moderation_muteroles_${guildId}`;
+}
+
+export async function getMuteRoles(guildId) {
+  try {
+    const roles = await getFromDb(muteRolesKey(guildId), []);
+    return Array.isArray(roles) ? roles : [];
+  } catch (error) {
+    logger.error('Error getting mute roles:', error);
+    return [];
+  }
+}
+
+export async function addMuteRole(guildId, roleId) {
+  try {
+    const roles = await getMuteRoles(guildId);
+    if (!roles.includes(roleId)) {
+      roles.push(roleId);
+      await setInDb(muteRolesKey(guildId), roles);
+    }
+    return roles;
+  } catch (error) {
+    logger.error('Error adding mute role:', error);
+    throw error;
+  }
+}
+
+export async function removeMuteRole(guildId, roleId) {
+  try {
+    const roles = await getMuteRoles(guildId);
+    const updated = roles.filter((id) => id !== roleId);
+    await setInDb(muteRolesKey(guildId), updated);
+    return updated;
+  } catch (error) {
+    logger.error('Error removing mute role:', error);
+    throw error;
+  }
 }
