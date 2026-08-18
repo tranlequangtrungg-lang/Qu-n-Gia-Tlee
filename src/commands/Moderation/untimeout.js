@@ -51,7 +51,7 @@ export default {
         await InteractionHelper.safeEditReply(interaction, {
             embeds: [
                 successEmbed(
-                    `🔓 **Đã gỡ tống ngay** khỏi ${targetUser.tag}`,
+                    `🔓 **Đã thả tù ngay** ${targetUser.tag}`,
                 ),
             ],
         });
