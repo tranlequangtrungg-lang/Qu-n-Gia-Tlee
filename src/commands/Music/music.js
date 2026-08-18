@@ -14,6 +14,7 @@ import {
     clearQueue,
     setTwentyFourSeven,
     leaveVoiceChannel,
+    setEqPreset,
     replyMusicSuccess,
 } from '../../services/music/musicActions.js';
 import { deferMusicCommand } from '../../services/music/prefixSupport.js';
@@ -102,6 +103,24 @@ export default {
                 .addBooleanOption((opt) =>
                     opt.setName('enabled').setDescription('Enable or disable 24/7 mode').setRequired(true),
                 ),
+        )
+        .addSubcommand((sub) =>
+            sub
+                .setName('eq')
+                .setDescription('Apply an audio preset')
+                .addStringOption((opt) =>
+                    opt
+                        .setName('preset')
+                        .setDescription('Preset to apply')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: 'Bass Boost', value: 'bassboost' },
+                            { name: 'Vocal Boost', value: 'vocalboost' },
+                            { name: 'Treble Boost', value: 'trebleboost' },
+                            { name: 'Nightcore', value: 'nightcore' },
+                            { name: 'Flat (Reset)', value: 'flat' },
+                        ),
+                ),
         ),
 
     async execute(interaction, config, client) {
@@ -176,6 +195,11 @@ export default {
             }
             case '247': {
                 const embed = await setTwentyFourSeven(client, interaction, interaction.options.getBoolean('enabled'));
+                await replyMusicSuccess(interaction, embed);
+                break;
+            }
+            case 'eq': {
+                const embed = await setEqPreset(client, interaction, interaction.options.getString('preset'));
                 await replyMusicSuccess(interaction, embed);
                 break;
             }
