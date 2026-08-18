@@ -40,8 +40,6 @@ function getAmLich(date = new Date()) {
     try {
         const solar = new SolarDate(date);
         const lunar = solar.toLunarDate();
-        // Tên năm âm lịch dạng Can-Chi (vd "Bính Ngọ"). Nếu bản lib khác không có
-        // getYearName/getMonthName, fallback về số ngày/tháng thô.
         const canChiNam = typeof lunar.getYearName === 'function' ? lunar.getYearName() : `${lunar.year}`;
         return { ngayAm: lunar.day, thangAm: lunar.month, canChiNam };
     } catch (error) {
@@ -50,7 +48,6 @@ function getAmLich(date = new Date()) {
     }
 }
 
-// Wrap text theo maxWidth, trả về mảng dòng
 function wrapLines(ctx, text, maxWidth) {
     const paragraphs = text.split('\n');
     const lines = [];
@@ -58,7 +55,7 @@ function wrapLines(ctx, text, maxWidth) {
         const words = para.split(' ');
         let current = '';
         for (const w of words) {
-            const test = current ? ${current} ${w} : w;
+            const test = current ? `${current} ${w}` : w;  // ✅ Fix backtick
             if (ctx.measureText(test).width > maxWidth && current) {
                 lines.push(current);
                 current = w;
@@ -71,7 +68,6 @@ function wrapLines(ctx, text, maxWidth) {
     return lines;
 }
 
-// Thử các cỡ chữ giảm dần cho đến khi số dòng vừa maxLines, trả {fontSize, lines}
 function fitText(ctx, text, maxWidth, maxLines, sizes, fontFamily) {
     for (const size of sizes) {
         ctx.font = `${size}px ${fontFamily}`;
@@ -88,13 +84,6 @@ function drawCenteredLines(ctx, lines, centerX, startY, lineHeight) {
     lines.forEach((line, i) => ctx.fillText(line, centerX, startY + i * lineHeight));
 }
 
-/**
- * @param {object} p
- * @param {string} p.avatarURL
- * @param {string} p.displayName - biệt danh server, KHÔNG dùng mention
- * @param {string} p.lyDo
- * @param {string} p.thoiGianText - chuỗi hiển thị đã format sẵn (vd "3 tiếng")
- */
 export async function renderThanhChi({ avatarURL, displayName, lyDo, thoiGianText }) {
     ensureFonts();
     const canvas = createCanvas(WIDTH, HEIGHT);
@@ -109,13 +98,11 @@ export async function renderThanhChi({ avatarURL, displayName, lyDo, thoiGianTex
 
     const maxTextWidth = WIDTH * 0.72;
 
-    // Đoạn trên
-    const topText = `TRUYỀN LỆNH!\nTội đồ ${displayName} vào giờ ${gioDiaChi}, ngày mùng ${ngayAm} tháng ${thangAm} năm ${canChiNam}, đã phạm tội ${lyDo}.`;
-        ctx.font = `bold 32px ${FONT_BOLD}`;
+    // ✅ Fix: khai báo và dùng đúng thứ tự
     const bodyTop = `Tội đồ ${displayName} vào giờ ${gioDiaChi}, ngày mùng ${ngayAm} tháng ${thangAm} năm ${canChiNam}, đã phạm tội ${lyDo}.`;
-        ctx.font = `${fitTop.fontSize}px ${FONT_REGULAR}`;
-    const bodyBottom = `Tang vật đã tịch thu đầy đủ.\nTuyên phạt đày đi khổ sai ${thoiGianText}.\nThi hành hình phạt ngay lập tức!`;
-        ctx.font = `${fitBottom.fontSize}px ${FONT_REGULAR}`;
+    const fitTop = fitText(ctx, bodyTop, maxTextWidth, 4, [34, 30, 26, 22, 20], FONT_REGULAR);
+    ctx.fillStyle = '#3b1a0a';
+    ctx.font = `${fitTop.fontSize}px ${FONT_REGULAR}`;
     drawCenteredLines(ctx, fitTop.lines, WIDTH / 2, 244, fitTop.fontSize * 1.35);
 
     // Avatar tròn
@@ -138,9 +125,10 @@ export async function renderThanhChi({ avatarURL, displayName, lyDo, thoiGianTex
         logger.warn('[THANHCHI_RENDER] Không tải được avatar', { error: error.message });
     }
 
-    // Đoạn dưới
+    // ✅ Fix: chỉ khai báo bodyBottom 1 lần, đúng chỗ
     const bodyBottom = `Tang vật đã tịch thu đầy đủ.\nTuyên phạt đày đi khổ sai ${thoiGianText}.\nThi hành hình phạt ngay lập tức!`;
     const fitBottom = fitText(ctx, bodyBottom, maxTextWidth, 3, [34, 30, 26, 22, 20], FONT_REGULAR);
+    ctx.fillStyle = '#3b1a0a';
     ctx.font = `${fitBottom.fontSize}px ${FONT_REGULAR}`;
     drawCenteredLines(ctx, fitBottom.lines, WIDTH / 2, 535, fitBottom.fontSize * 1.35);
 
