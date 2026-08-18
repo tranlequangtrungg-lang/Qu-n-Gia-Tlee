@@ -30,7 +30,9 @@ const backButton = {
 const categoryButtons = GROUP_ORDER.map((key) => ({
     name: `tleecuube-view_${key}`,
     async execute(interaction, client) {
-        const view = await buildCategoryView(client, key);
+        // Truyền guildId để buildCategoryView lấy đúng ID lệnh riêng của
+        // server này (nếu có), không chỉ lệnh đăng ký toàn cục.
+        const view = await buildCategoryView(client, key, interaction.guildId);
         await safeUpdate(interaction, view);
     },
 }));
