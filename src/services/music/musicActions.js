@@ -421,6 +421,62 @@ export async function clearQueue(client, interaction) {
     return successEmbed('Queue Cleared', 'All queued tracks were removed.');
 }
 
+const EQ_LABELS = {
+    bassboost: 'Bass Boost',
+    vocalboost: 'Vocal Boost',
+    trebleboost: 'Treble Boost',
+    nightcore: 'Nightcore',
+    flat: 'Flat (Reset)',
+};
+
+// 15-band Lavalink equalizer, band 0 = lowest frequency (~25Hz), band 14 = highest (~16kHz).
+function buildEqualizerBands(gainsByBand) {
+    return Array.from({ length: 15 }, (_, band) => ({ band, gain: gainsByBand[band] || 0 }));
+}
+
+export async function setEqPreset(client, interaction, preset) {
+    const player = getPlayer(client, interaction.guild.id);
+    if (!player) {
+        throw new TitanBotError('No player', ErrorTypes.USER_INPUT, 'No active music player.');
+    }
+    assertCanControl(interaction.member, player);
+
+    if (!EQ_LABELS[preset]) {
+        throw new TitanBotError('Invalid preset', ErrorTypes.USER_INPUT, 'Unknown EQ preset.');
+    }
+
+    // Reset any previously applied filter before switching presets.
+    player.filters.clearFilters();
+
+    switch (preset) {
+        case 'bassboost':
+            player.filters.setBassboost(true, { value: 3 });
+            break;
+        case 'nightcore':
+            player.filters.setNightcore(true, { rate: 1.2 });
+            break;
+        case 'vocalboost':
+            // Boost mid frequencies (~160Hz-1.6kHz) where most vocal presence sits.
+            player.filters.setEqualizer(buildEqualizerBands({
+                3: 0.05, 4: 0.15, 5: 0.2, 6: 0.25, 7: 0.25, 8: 0.2, 9: 0.15, 10: 0.05,
+            }));
+            break;
+        case 'trebleboost':
+            // Boost high frequencies (~2.5kHz-16kHz) for a brighter, sharper sound.
+            player.filters.setEqualizer(buildEqualizerBands({
+                10: 0.1, 11: 0.15, 12: 0.2, 13: 0.25, 14: 0.25,
+            }));
+            break;
+        case 'flat':
+            // clearFilters() above already resets everything.
+            break;
+        default:
+            break;
+    }
+
+    return successEmbed('EQ Updated', `Audio preset set to **${EQ_LABELS[preset]}**.`);
+}
+
 export async function setTwentyFourSeven(client, interaction, enabled) {
     const guildData = getGuildMusicData(interaction.guild.id);
     guildData.twentyFourSeven = enabled;
