@@ -18,6 +18,7 @@ import { resolveSlashAccessKey } from '../utils/messageAdapter.js';
 import { isCollectorManagedComponent } from '../utils/collectorComponents.js';
 import { ResponseCoordinator } from '../utils/responseCoordinator.js';
 import { enforceDefaultCommandPermissions } from '../utils/permissionGuard.js';
+import { resolveRequiredChannelId } from '../utils/commandRooms.js';
 
 const COMMAND_ERROR_SUBTYPES = {
   warn: 'warn_failed',
@@ -157,6 +158,29 @@ export default {
             });
             if (!permissionAllowed) {
               return;
+            }
+
+            // Room/channel restriction: some commands (or specific subcommands)
+            // are only allowed to run in a designated channel, configured in
+            // src/utils/commandRooms.js. Bot owners bypass this so testing
+            // isn't blocked. This intentionally runs after all permission
+            // checks above so a user who can't even use the command yet
+            // gets the permission error, not a channel error.
+            if (interaction.guild && !isBotOwner(interaction.user.id)) {
+              const requiredChannelId = resolveRequiredChannelId(interaction, command);
+              if (requiredChannelId && interaction.channelId !== requiredChannelId) {
+                throw createError(
+                  `Command ${interaction.commandName} used outside its designated channel`,
+                  ErrorTypes.VALIDATION,
+                  `Lệnh này chỉ dùng được ở <#${requiredChannelId}>.`,
+                  withTraceContext({
+                    commandName: interaction.commandName,
+                    requiredChannelId,
+                    actualChannelId: interaction.channelId,
+                    subtype: 'wrong_channel'
+                  }, interactionTraceContext)
+                );
+              }
             }
 
             await command.execute(interaction, guildConfig, client);
