@@ -52,19 +52,22 @@ function getAmLich(date = new Date()) {
 
 // Wrap text theo maxWidth, trả về mảng dòng
 function wrapLines(ctx, text, maxWidth) {
-    const words = text.split(' ');
+    const paragraphs = text.split('\n');
     const lines = [];
-    let current = '';
-    for (const w of words) {
-        const test = current ? `${current} ${w}` : w;
-        if (ctx.measureText(test).width > maxWidth && current) {
-            lines.push(current);
-            current = w;
-        } else {
-            current = test;
+    for (const para of paragraphs) {
+        const words = para.split(' ');
+        let current = '';
+        for (const w of words) {
+            const test = current ? ${current} ${w} : w;
+            if (ctx.measureText(test).width > maxWidth && current) {
+                lines.push(current);
+                current = w;
+            } else {
+                current = test;
+            }
         }
+        if (current) lines.push(current);
     }
-    if (current) lines.push(current);
     return lines;
 }
 
@@ -104,7 +107,7 @@ export async function renderThanhChi({ avatarURL, displayName, lyDo, thoiGianTex
     const gioDiaChi = getGioDiaChi(now);
     const { ngayAm, thangAm, canChiNam } = getAmLich(now);
 
-    const maxTextWidth = WIDTH * 0.85;
+    const maxTextWidth = WIDTH * 0.72;
 
     // Đoạn trên
     const topText = `TRUYỀN LỆNH!\nTội đồ ${displayName} vào giờ ${gioDiaChi}, ngày mùng ${ngayAm} tháng ${thangAm} năm ${canChiNam}, đã phạm tội ${lyDo}.`;
