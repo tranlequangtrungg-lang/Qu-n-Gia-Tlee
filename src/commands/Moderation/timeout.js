@@ -105,7 +105,7 @@ export default {
         // Gửi DM báo người bị mute (best-effort, không chặn luồng chính nếu lỗi)
         try {
             await targetUser.send(
-                `Bạn đã bị tống ngay tại **${interaction.guild.name}** trong ${parsed.display}.\nLý do: ${reason}`,
+                `Bạn đã bị tù ngay tại **${interaction.guild.name}** trong ${parsed.display}.\nLý do: ${reason}`,
             );
         } catch (error) {
             logger.warn('[TUNGAY] Không gửi được DM báo mute', { userId: targetUser.id, error: error.message });
@@ -136,7 +136,7 @@ export default {
         await InteractionHelper.safeEditReply(interaction, {
             embeds: [
                 successEmbed(
-                    `⏳ **Đã tống ngay** ${targetUser.tag} trong ${parsed.display}.`,
+                    `⏳ **Đã tù ngay** ${targetUser.tag} trong ${parsed.display}.`,
                     `**Lý do:** ${reason}\n**Case ID:** #${result.caseId}`,
                 ),
             ],
