@@ -8,7 +8,6 @@ import {
   isMaintenanceMode,
 } from '../config/bot.js';
 import botConfig from '../config/bot.js';
-import { handleApplicationModal } from '../commands/Community/apply.js';
 import { handleInteractionError, createError, ErrorTypes, ErrorCodes } from '../utils/errorHandler.js';
 import { InteractionHelper } from '../utils/interactionHelper.js';
 import { createInteractionTraceContext, runWithTraceContext } from '../utils/logger.js';
@@ -185,57 +184,8 @@ export default {
           }
 
           const focusedOption = interaction.options.getFocused(true);
-          
-          if (interaction.commandName === 'apply' && focusedOption.name === 'application') {
-            try {
-              const { getApplicationRoles } = await import('../utils/database.js');
-              const roles = await getApplicationRoles(client, interaction.guildId);
-              const roleName = interaction.options.getString('application', false);
 
-              const filtered = roles.filter(role =>
-                role.enabled !== false && 
-                role.name.toLowerCase().startsWith(roleName?.toLowerCase() || '')
-              );
-              
-              await interaction.respond(
-                filtered.slice(0, 25).map(role => ({
-                  name: `${role.name}${role.enabled === false ? ' (disabled)' : ''}`,
-                  value: role.name
-                }))
-              );
-            } catch (error) {
-              logger.error('Error handling autocomplete:', {
-                error: error.message,
-                guildId: interaction.guildId,
-                commandName: interaction.commandName
-              });
-              await interaction.respond([]);
-            }
-          } else if (interaction.commandName === 'app-admin' && focusedOption.name === 'application') {
-            try {
-              const { getApplicationRoles } = await import('../utils/database.js');
-              const roles = await getApplicationRoles(client, interaction.guildId);
-              const appName = interaction.options.getString('application', false);
-
-              const filtered = roles.filter(role =>
-                role.name.toLowerCase().startsWith(appName?.toLowerCase() || '')
-              );
-              
-              await interaction.respond(
-                filtered.slice(0, 25).map(role => ({
-                  name: `${role.name}${role.enabled === false ? ' (disabled)' : ''}`,
-                  value: role.name
-                }))
-              );
-            } catch (error) {
-              logger.error('Error handling app-admin autocomplete:', {
-                error: error.message,
-                guildId: interaction.guildId,
-                commandName: interaction.commandName
-              });
-              await interaction.respond([]);
-            }
-          } else if (interaction.commandName === 'reactroles' && focusedOption.name === 'panel') {
+          if (interaction.commandName === 'reactroles' && focusedOption.name === 'panel') {
             try {
               const { getAllReactionRoleMessages, deleteReactionRoleMessage } = await import('../services/reactionRoleService.js');
               const guildId = interaction.guildId;
@@ -385,19 +335,6 @@ export default {
             }, interactionTraceContext));
           }
         } else if (interaction.isModalSubmit()) {
-          if (interaction.customId.startsWith('app_modal_')) {
-            try {
-              await handleApplicationModal(interaction);
-            } catch (error) {
-              await handleInteractionError(interaction, error, withTraceContext({
-                type: 'modal',
-                customId: interaction.customId,
-                handler: 'application'
-              }, interactionTraceContext));
-            }
-            return;
-          }
-
           if (
             interaction.customId.startsWith('app_review_')
             || interaction.customId.startsWith('jtc_')
