@@ -1,17 +1,17 @@
 [
   {
     "host": "lavalinkv4.serenetia.com",
-    "port": 80,
+    "port": 443,
     "password": "https://seretia.link/discord",
-    "secure": false,
+    "secure": true,
     "name": "Serenetia"
   },
   {
-    "host": "lava-v4.ajieblogs.eu.org",
+    "host": "lavalink.jirayu.net",
     "port": 443,
-    "password": "https://dsc.gg/ajidevserver",
+    "password": "youshallnotpass",
     "secure": true,
-    "name": "AjieDev"
+    "name": "Jirayu"
   },
   {
     "host": "lava-v4.millohost.my.id",
@@ -26,5 +26,12 @@
     "password": "free",
     "secure": true,
     "name": "TriniumHost"
+  },
+  {
+    "host": "nodelink.triniumhost.com",
+    "port": 443,
+    "password": "free",
+    "secure": true,
+    "name": "TriniumHost-NodeLink"
   }
 ]
