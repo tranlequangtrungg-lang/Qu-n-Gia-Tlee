@@ -5,10 +5,10 @@ import { SolarDate } from '@nghiavuive/lunar_date_vi';
 import { logger } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BG_PATH = path.join(__dirname, '../../assets/images/thanhchi_bg.png');
+export const BG_PATH = path.join(__dirname, '../../assets/images/thanhchi_bg.png');
 
 let fontsRegistered = false;
-function ensureFonts() {
+export function ensureFonts() {
     if (fontsRegistered) return;
     fontsRegistered = true;
     try {
@@ -19,10 +19,10 @@ function ensureFonts() {
     }
 }
 
-const FONT_BOLD = 'CasinoBold, sans-serif';
-const FONT_REGULAR = 'CasinoRegular, sans-serif';
-const WIDTH = 1424;
-const HEIGHT = 752;
+export const FONT_BOLD = 'CasinoBold, sans-serif';
+export const FONT_REGULAR = 'CasinoRegular, sans-serif';
+export const WIDTH = 1424;
+export const HEIGHT = 752;
 
 const GIO_DIA_CHI = [
     ['Tý', 23, 1], ['Sửu', 1, 3], ['Dần', 3, 5], ['Mão', 5, 7],
@@ -30,13 +30,13 @@ const GIO_DIA_CHI = [
     ['Thân', 15, 17], ['Dậu', 17, 19], ['Tuất', 19, 21], ['Hợi', 21, 23],
 ];
 
-function getGioDiaChi(date = new Date()) {
+export function getGioDiaChi(date = new Date()) {
     const h = date.getHours();
     const hit = GIO_DIA_CHI.find(([, start, end]) => (start < end ? h >= start && h < end : h >= start || h < end));
     return hit ? hit[0] : 'Tý';
 }
 
-function getAmLich(date = new Date()) {
+export function getAmLich(date = new Date()) {
     try {
         const solar = new SolarDate(date);
         const lunar = solar.toLunarDate();
@@ -48,7 +48,7 @@ function getAmLich(date = new Date()) {
     }
 }
 
-function wrapLines(ctx, text, maxWidth) {
+export function wrapLines(ctx, text, maxWidth) {
     const paragraphs = text.split('\n');
     const lines = [];
     for (const para of paragraphs) {
@@ -68,7 +68,7 @@ function wrapLines(ctx, text, maxWidth) {
     return lines;
 }
 
-function fitText(ctx, text, maxWidth, maxLines, sizes, fontFamily) {
+export function fitText(ctx, text, maxWidth, maxLines, sizes, fontFamily) {
     for (const size of sizes) {
         ctx.font = `${size}px ${fontFamily}`;
         const lines = wrapLines(ctx, text, maxWidth);
@@ -79,7 +79,7 @@ function fitText(ctx, text, maxWidth, maxLines, sizes, fontFamily) {
     return { fontSize: size, lines: wrapLines(ctx, text, maxWidth).slice(0, maxLines) };
 }
 
-function drawCenteredLines(ctx, lines, centerX, startY, lineHeight) {
+export function drawCenteredLines(ctx, lines, centerX, startY, lineHeight) {
     ctx.textAlign = 'center';
     lines.forEach((line, i) => ctx.fillText(line, centerX, startY + i * lineHeight));
 }
