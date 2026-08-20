@@ -6,6 +6,7 @@ import { logEvent, EVENT_TYPES } from '../loggingService.js';
 import { formatLogLine } from '../../utils/logging/logEmbeds.js';
 import { Mutex } from '../../utils/mutex.js';
 import { wrapServiceBoundary } from '../../utils/errorHandler.js';
+import { checkDanhVongMoc } from '../vinhDanhService.js';
 
 /**
  * Award XP to a member. Returns null when XP is skipped (disabled/invalid amount).
@@ -74,6 +75,15 @@ export const addXp = wrapServiceBoundary(async function addXp(client, guild, mem
     }
 
     await saveUserLevelData(client, guild.id, member.user.id, levelData);
+
+    // Kiểm tra mốc Danh Vọng — chỉ khi vừa lên level, chạy nền (không await
+    // chặn addXp) vì render ảnh + gán role có thể mất vài trăm ms, không nên
+    // làm chậm luồng xử lý tin nhắn của mọi người.
+    if (didLevelUp) {
+      checkDanhVongMoc(client, guild.id, member.user.id, levelData.level).catch((error) => {
+        logger.warn('[VINH_DANH] checkDanhVongMoc (xp) lỗi:', error.message);
+      });
+    }
 
     return {
       level: levelData.level,
