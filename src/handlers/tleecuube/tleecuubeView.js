@@ -1,6 +1,7 @@
 import { createEmbed } from '../../utils/embeds.js';
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { CATEGORY_ROOMS, SUBCOMMAND_ROOMS } from '../../utils/commandRooms.js';
+import { TAI_SAN_MOCS, DANH_VONG_MOCS } from '../../services/vinhDanhService.js';
 
 export const GROUP_ORDER = ['economy', 'fun', 'music', 'roles'];
 export const GROUPS = {
@@ -162,6 +163,22 @@ function buildRestrictedSubcommandLines(command, appCommands) {
     });
 }
 
+// Liệt kê 11 vai trò mốc (6 Tài Sản + 5 Danh Vọng) kèm cách đạt được, lấy
+// trực tiếp từ TAI_SAN_MOCS/DANH_VONG_MOCS trong vinhDanhService.js — dùng
+// chung 1 nguồn dữ liệu duy nhất với hệ thống vinh danh, tránh bị lệch khi
+// mốc/role thay đổi sau này.
+function buildMilestoneRolesSection() {
+    const taiSanLines = TAI_SAN_MOCS
+        .map((m) => `<@&${m.roleId}> — **${m.name}**\n> Đạt tổng **${m.threshold.toLocaleString('vi-VN')} Bcoin** (ví + ngân hàng cộng lại)`)
+        .join('\n');
+
+    const danhVongLines = DANH_VONG_MOCS
+        .map((m) => `<@&${m.roleId}> — **${m.name}**\n> Đạt **Level ${m.threshold}** (chat để nhận XP và lên cấp)`)
+        .join('\n');
+
+    return `\n\n**💰 Vai trò theo Tài Sản**\n${taiSanLines}\n\n**⭐ Vai trò theo Danh Vọng**\n${danhVongLines}`;
+}
+
 export function buildOverviewButtons(groups) {
     const buttons = GROUP_ORDER
         .filter((key) => groups[key].length > 0)
@@ -219,9 +236,14 @@ export async function buildCategoryView(client, key, guildId) {
         return [`${mention} — ${describeCommand(cmd)}`];
     });
 
-    const description = lines.length > 0
+    let description = lines.length > 0
         ? roomBanner + lines.join('\n')
         : 'Chưa có lệnh nào trong mục này.';
+
+    // Ở mục Vai Trò, in thêm danh sách 11 vai trò mốc kèm cách đạt được.
+    if (key === 'roles') {
+        description += buildMilestoneRolesSection();
+    }
 
     const embed = createEmbed({
         title: group.label,
