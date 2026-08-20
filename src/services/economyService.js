@@ -4,6 +4,17 @@ import { logger } from '../utils/logger.js';
 import { getEconomyData, setEconomyData, getMaxBankCapacity } from '../utils/economy.js';
 import { createError, ErrorTypes } from '../utils/errorHandler.js';
 import { wrapServiceClassMethods } from '../utils/serviceErrorBoundary.js';
+import { checkTaiSanMoc } from './vinhDanhService.js';
+
+// Kiểm tra mốc Tài Sản chạy nền (không await, không chặn thao tác kinh tế
+// chính) — lỗi được tự log bên trong checkTaiSanMoc, không văng ra ngoài,
+// không ảnh hưởng tới người dùng nếu render ảnh/gán role bị chậm hoặc lỗi.
+function checkTaiSanMocBackground(client, guildId, userId, userData) {
+  const tongBcoin = (userData?.wallet || 0) + (userData?.bank || 0);
+  checkTaiSanMoc(client, guildId, userId, tongBcoin).catch((error) => {
+    logger.warn('[VINH_DANH] checkTaiSanMoc (economy) lỗi:', error.message);
+  });
+}
 
 class EconomyService {
 
@@ -69,6 +80,7 @@ class EconomyService {
 
     try {
       await setEconomyData(client, guildId, userId, userData);
+      checkTaiSanMocBackground(client, guildId, userId, userData);
       
       logger.info(`[ECONOMY_TRANSACTION] Daily claimed`, {
         userId,
@@ -192,6 +204,10 @@ class EconomyService {
         throw receiverError;
       }
 
+      // Cả 2 bên đều thay đổi số dư — kiểm tra mốc Tài Sản cho cả 2.
+      checkTaiSanMocBackground(client, guildId, senderId, senderData);
+      checkTaiSanMocBackground(client, guildId, receiverId, receiverData);
+
       logger.info(`[ECONOMY_TRANSACTION] Money transferred`, {
         type: 'transfer',
         senderId,
@@ -245,6 +261,7 @@ class EconomyService {
     userData.wallet = nextWallet;
 
     await setEconomyData(client, guildId, userId, userData);
+    checkTaiSanMocBackground(client, guildId, userId, userData);
 
     logger.info(`[ECONOMY_TRANSACTION] Money added`, {
       userId,
@@ -287,6 +304,7 @@ class EconomyService {
     userData.wallet = balanceBefore - amount;
 
     await setEconomyData(client, guildId, userId, userData);
+    checkTaiSanMocBackground(client, guildId, userId, userData);
 
     logger.info(`[ECONOMY_TRANSACTION] Money removed`, {
       userId,
@@ -337,6 +355,9 @@ class EconomyService {
     userData.bank = nextBank;
 
     await setEconomyData(client, guildId, userId, userData);
+    // Tổng ví+bank không đổi khi gửi tiền vào bank, nhưng vẫn gọi để nhất
+    // quán — hàm tự thoát sớm nếu không có mốc mới nào bị vượt qua.
+    checkTaiSanMocBackground(client, guildId, userId, userData);
 
     logger.info(`[ECONOMY_TRANSACTION] Money deposited to bank`, {
       userId,
@@ -375,6 +396,7 @@ class EconomyService {
     userData.bank = nextBank;
 
     await setEconomyData(client, guildId, userId, userData);
+    checkTaiSanMocBackground(client, guildId, userId, userData);
 
     logger.info(`[ECONOMY_TRANSACTION] Money withdrawn from bank`, {
       userId,
