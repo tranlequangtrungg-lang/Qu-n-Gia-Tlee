@@ -148,24 +148,29 @@ export function createLeaderboardEmbed(leaderboard, guild) {
 }
 
 export async function getLevelingConfig(client, guildId) {
+  const defaults = {
+    enabled: true,
+    xpPerMessage: { min: 15, max: 25 },
+    xpCooldown: 20,
+    levelUpMessage: '{user} has leveled up to level {level}!',
+    levelUpChannel: null,
+    ignoredChannels: [],
+    ignoredRoles: [],
+    blacklistedUsers: [],
+    roleRewards: {},
+    announceLevelUp: true,
+    xpMultiplier: 1,
+  };
   try {
     const guildConfig = await getGuildConfig(client, guildId);
-    return guildConfig.leveling || {
-      enabled: true,
-      xpPerMessage: { min: 15, max: 25 },
-      xpCooldown: 20,
-      levelUpMessage: '{user} has leveled up to level {level}!',
-      levelUpChannel: null,
-      ignoredChannels: [],
-      ignoredRoles: [],
-      blacklistedUsers: [],
-      roleRewards: {},
-      announceLevelUp: true,
-      xpMultiplier: 1
-    };
+    // Gộp default với config đã lưu — tránh lỗi "object rỗng vẫn truthy"
+    // khiến toàn bộ default (bao gồm enabled:true) bị bỏ qua.
+    return { ...defaults, ...(guildConfig.leveling || {}) };
   } catch (error) {
     logger.error(`Error getting leveling config for guild ${guildId}:`, error);
-    return {
+    return defaults;
+  }
+}
       enabled: true,
       xpPerMessage: { min: 15, max: 25 },
       xpCooldown: 20,
