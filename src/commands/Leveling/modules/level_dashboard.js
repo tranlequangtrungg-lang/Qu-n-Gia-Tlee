@@ -148,13 +148,13 @@ export default {
             const guildId = interaction.guild.id;
             const cfg = await getLevelingConfig(client, guildId);
 
-            if (!cfg.configured) {
-                throw new TitanBotError(
-                    'Leveling system not configured',
-                    ErrorTypes.CONFIGURATION,
-                    'The leveling system has not been set up yet. Run `/level setup` first to configure it.',
-                );
-            }
+async execute(interaction, config, client) {
+    try {
+        const guildId = interaction.guild.id;
+        const cfg = await getLevelingConfig(client, guildId);
+
+        await startDashboardSession({
+            // ... phần còn lại giữ nguyên
 
             await startDashboardSession({
                 interaction,
