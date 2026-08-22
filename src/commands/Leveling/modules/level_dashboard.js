@@ -148,14 +148,6 @@ export default {
             const guildId = interaction.guild.id;
             const cfg = await getLevelingConfig(client, guildId);
 
-async execute(interaction, config, client) {
-    try {
-        const guildId = interaction.guild.id;
-        const cfg = await getLevelingConfig(client, guildId);
-
-        await startDashboardSession({
-            // ... phần còn lại giữ nguyên
-
             await startDashboardSession({
                 interaction,
                 embeds: [buildDashboardEmbed(cfg, interaction.guild)],
@@ -415,7 +407,7 @@ async function handleChannel(selectInteraction, rootInteraction, cfg, guildId, c
     await saveLevelingConfig(client, guildId, cfg);
 
     await submitted.reply({
-        embeds: [successEmbed('\u2705 Channel Updated', `Level-up notifications will now be sent in ${channel ??`<#${channelId}>`}.`)],
+        embeds: [successEmbed('\u2705 Channel Updated', `Level-up notifications will now be sent in ${channel ?? `<#${channelId}>`}.`)],
         flags: MessageFlags.Ephemeral,
     });
 
