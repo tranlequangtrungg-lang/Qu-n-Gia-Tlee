@@ -12,6 +12,20 @@ const XP_MULTIPLIER = 1.5;
 const MAX_LEVEL = 1000;
 const MIN_LEVEL = 0;
 
+const DEFAULT_LEVELING_CONFIG = {
+  enabled: true,
+  xpPerMessage: { min: 15, max: 25 },
+  xpCooldown: 20,
+  levelUpMessage: '{user} has leveled up to level {level}!',
+  levelUpChannel: null,
+  ignoredChannels: [],
+  ignoredRoles: [],
+  blacklistedUsers: [],
+  roleRewards: {},
+  announceLevelUp: true,
+  xpMultiplier: 1
+};
+
 export function getXpForLevel(level) {
   if (!Number.isInteger(level) || level < 0 || level > MAX_LEVEL) {
     throw new TitanBotError(
@@ -147,42 +161,18 @@ export function createLeaderboardEmbed(leaderboard, guild) {
   return embed;
 }
 
+// Gộp default với config đã lưu trong DB thay vì chọn 1-trong-2. Trước đây
+// dùng "guildConfig.leveling || {defaults}" — nếu guildConfig.leveling từng
+// bị lưu thành {} (object rỗng, vẫn truthy trong JS), toàn bộ default (kể
+// cả enabled:true) bị bỏ qua hoàn toàn -> hệ thống bị coi là "disabled" dù
+// không ai tắt gì. Spread gộp field-theo-field tránh được lỗi này.
 export async function getLevelingConfig(client, guildId) {
-  const defaults = {
-    enabled: true,
-    xpPerMessage: { min: 15, max: 25 },
-    xpCooldown: 20,
-    levelUpMessage: '{user} has leveled up to level {level}!',
-    levelUpChannel: null,
-    ignoredChannels: [],
-    ignoredRoles: [],
-    blacklistedUsers: [],
-    roleRewards: {},
-    announceLevelUp: true,
-    xpMultiplier: 1,
-  };
   try {
     const guildConfig = await getGuildConfig(client, guildId);
-    // Gộp default với config đã lưu — tránh lỗi "object rỗng vẫn truthy"
-    // khiến toàn bộ default (bao gồm enabled:true) bị bỏ qua.
-    return { ...defaults, ...(guildConfig.leveling || {}) };
+    return { ...DEFAULT_LEVELING_CONFIG, ...(guildConfig.leveling || {}) };
   } catch (error) {
     logger.error(`Error getting leveling config for guild ${guildId}:`, error);
-    return defaults;
-  }
-}
-      enabled: true,
-      xpPerMessage: { min: 15, max: 25 },
-      xpCooldown: 20,
-      levelUpMessage: '{user} has leveled up to level {level}!',
-      levelUpChannel: null,
-      ignoredChannels: [],
-      ignoredRoles: [],
-      blacklistedUsers: [],
-      roleRewards: {},
-      announceLevelUp: true,
-      xpMultiplier: 1
-    };
+    return { ...DEFAULT_LEVELING_CONFIG };
   }
 }
 
