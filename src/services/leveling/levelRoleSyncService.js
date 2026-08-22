@@ -3,7 +3,7 @@ import { getLevelingConfig, getUserLevelData, saveLevelingConfig } from './level
 
 import { getUserLevelPrefix } from '../../utils/database/keys.js';
 
-async function listLevelUserIds(client, guildId) {
+export async function listLevelUserIds(client, guildId) {
     if (!client.db?.list) return [];
 
     const prefixes = [getUserLevelPrefix(guildId), `${guildId}:leveling:users:`];
