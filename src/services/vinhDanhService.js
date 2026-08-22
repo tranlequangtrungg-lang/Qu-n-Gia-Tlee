@@ -49,6 +49,59 @@ async function sendVinhDanhImage(client, guildId, channelId, buffer, filename) {
     }
 }
 
+/**
+ * Quét lại 1 user đã đạt mốc Danh Vọng từ trước khi hệ thống vinh danh tồn
+ * tại (hoặc trong lúc leveling bị tắt), nên chưa từng có sự kiện "lên level"
+ * nào kích hoạt checkDanhVongMoc. Khác checkDanhVongMoc: LUÔN gửi thánh chỉ
+ * (không thoát sớm nếu role đã có sẵn) — vì mục đích là gửi thông báo còn
+ * thiếu, không phải tránh gửi trùng. Chỉ dùng 1 lần qua lệnh admin, không
+ * gọi từ luồng chính.
+ */
+export async function backfillDanhVongMoc(client, guildId, userId, level) {
+    try {
+        const targetMoc = findTargetMoc(DANH_VONG_MOCS, level);
+        if (!targetMoc) return false;
+
+        const guild = client.guilds.cache.get(guildId) || (await client.guilds.fetch(guildId).catch(() => null));
+        if (!guild) return false;
+
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (!member) return false;
+
+        const axisRoleIds = DANH_VONG_MOCS.map((m) => m.roleId);
+        const alreadyHasTarget = member.roles.cache.has(targetMoc.roleId);
+
+        if (!alreadyHasTarget) {
+            const rolesToRemove = axisRoleIds.filter((id) => id !== targetMoc.roleId && member.roles.cache.has(id));
+            if (rolesToRemove.length > 0) {
+                await member.roles.remove(rolesToRemove, 'Backfill mốc Danh Vọng').catch((error) => {
+                    logger.warn('[VINH_DANH] Backfill: không gỡ được role Danh Vọng cũ:', error.message);
+                });
+            }
+            await member.roles.add(targetMoc.roleId, 'Backfill mốc Danh Vọng').catch((error) => {
+                logger.warn('[VINH_DANH] Backfill: không gán được role Danh Vọng mới:', error.message);
+            });
+        }
+
+        const thuTu = await incrementMocCounter(guildId, `danhvong_${targetMoc.roleId}`);
+
+        const buffer = await renderVinhDanhDanhVong({
+            avatarURL: member.displayAvatarURL({ extension: 'png', size: 256 }),
+            displayName: member.displayName,
+            level,
+            tenRole: targetMoc.name,
+            thuTu,
+        });
+
+        await sendVinhDanhImage(client, guildId, CHANNEL_DANH_VONG, buffer, `tan-phong-danh-vong-backfill-${userId}.png`);
+        logger.info(`[VINH_DANH] Backfill: ${member.user.tag} — mốc "${targetMoc.name}" (thứ ${thuTu})`);
+        return true;
+    } catch (error) {
+        logger.warn('[VINH_DANH] backfillDanhVongMoc lỗi:', error.message);
+        return false;
+    }
+}
+
 // Tìm mốc cao nhất mà giá trị hiện tại đã đạt được trong 1 danh sách mốc.
 function findTargetMoc(mocs, value) {
     let target = null;
