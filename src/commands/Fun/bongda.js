@@ -191,10 +191,15 @@ export default {
             return;
         }
 
-        const message = await InteractionHelper.safeEditReply(interaction, {
+        await InteractionHelper.safeEditReply(interaction, {
             embeds: [buildMatchEmbed(match)],
             components: buildBetButtons(match),
         });
+
+        // Dùng fetchReply() để chắc chắn lấy đúng đối tượng Message thật —
+        // trước đây dùng luôn giá trị trả về của safeEditReply nên collector
+        // gắn nhầm chỗ, khiến nút bấm không bao giờ được lắng nghe.
+        const message = await interaction.fetchReply().catch(() => null);
         if (!message) return;
 
         // Lắng nghe nút bấm ngay trên tin nhắn bảng cược — bất kỳ ai trong
