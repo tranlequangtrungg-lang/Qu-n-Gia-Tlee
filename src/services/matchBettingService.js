@@ -138,6 +138,20 @@ function determineOutcome(realScoreA, realScoreB) {
 }
 
 /**
+ * Đóng cược thủ công — admin chủ động gọi trước giờ đá để tránh bị "ăn
+ * chặn" khi đã biết diễn biến trận. Khác resolveMatch: không cần tỉ số
+ * thật, chỉ chặn cược mới; chốt thưởng vẫn làm riêng sau qua resolveMatch.
+ */
+export async function closeBetting(client, guildId, matchId) {
+    const match = await getMatch(client, guildId, matchId);
+    if (!match) return { ok: false, reason: 'not_found' };
+    if (match.status !== 'open') return { ok: false, reason: 'not_open' };
+    match.status = 'closed';
+    await client.db.set(matchKey(guildId, matchId), match);
+    return { ok: true, match };
+}
+
+/**
  * Chốt trận: nhập tỉ số thật, tính thắng-thua cho từng cược đã đặt, cộng
  * tiền thắng cược qua EconomyService.addMoney (giữ đồng bộ với hệ thống
  * vinh danh — cộng tiền tự động kiểm tra mốc Tài Sản mới như mọi giao dịch
