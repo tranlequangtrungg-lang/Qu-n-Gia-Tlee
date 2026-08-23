@@ -94,29 +94,33 @@ export async function getUserBet(client, guildId, matchId, userId) {
  * hoàn tiền khi đổi cược.
  */
 export async function placeBet(client, guildId, userId, matchId, type, pick, amount) {
-    return await withEconomyLock(guildId, userId, async () => {
-        const match = await getMatch(client, guildId, matchId);
-        if (!match || match.status !== 'open') {
-            return { ok: false, reason: 'match_closed' };
-        }
+    const match = await getMatch(client, guildId, matchId);
+    if (!match || match.status !== 'open') {
+        return { ok: false, reason: 'match_closed' };
+    }
 
+    const existingCheck = await getUserBet(client, guildId, matchId, userId);
+    if (existingCheck) {
+        return { ok: false, reason: 'already_bet' };
+    }
+
+    // Gọi TRƯỚC, ngoài withEconomyLock bên dưới — recordBetAndGetTaxRate tự
+    // khoá/nhả economy lock của riêng nó cho cùng user này. Gọi lồng bên
+    // trong 1 lớp khoá khác của cùng user sẽ tự khoá chết (deadlock): lớp
+    // khoá ngoài chờ lớp trong nhả, lớp trong lại chờ lớp ngoài nhả trước.
+    const { taxRate } = await recordBetAndGetTaxRate(client, guildId, userId, amount);
+    const tax = Math.floor(amount * taxRate);
+    const totalCharge = amount + tax;
+
+    return await withEconomyLock(guildId, userId, async () => {
+        // Kiểm tra lại 1 lần nữa trong khoá — phòng trường hợp có request
+        // khác chen vào giữa lúc chờ recordBetAndGetTaxRate ở trên.
         const existing = await getUserBet(client, guildId, matchId, userId);
         if (existing) {
             return { ok: false, reason: 'already_bet' };
         }
 
         const userData = await getEconomyData(client, guildId, userId);
-        if ((userData.wallet || 0) < amount) {
-            return { ok: false, reason: 'insufficient_funds', available: userData.wallet || 0 };
-        }
-
-        // Dùng chung hệ thống hạn mức cược/ngày + thuế vượt hạn mức đã có
-        // sẵn cho casino, để cược trận đấu không trở thành đường lách luật
-        // riêng ngoài hạn mức chung.
-        const { taxRate } = await recordBetAndGetTaxRate(client, guildId, userId, amount);
-        const tax = Math.floor(amount * taxRate);
-        const totalCharge = amount + tax;
-
         if ((userData.wallet || 0) < totalCharge) {
             return { ok: false, reason: 'insufficient_funds_with_tax', available: userData.wallet || 0, totalCharge };
         }
