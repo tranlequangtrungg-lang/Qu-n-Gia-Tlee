@@ -577,4 +577,22 @@ export async function replyMusicSuccess(interaction, embed) {
     } else {
         await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
+
+    export async function setAutoplay(client, interaction, enabled) {
+    const player = getPlayer(client, interaction.guild.id);
+    if (!player) {
+        throw new TitanBotError('No player', ErrorTypes.USER_INPUT, 'No active music player.');
+    }
+    assertCanControl(interaction.member, player);
+
+    const guildData = getGuildMusicData(interaction.guild.id);
+    guildData.autoplay = enabled;
+
+    return successEmbed(
+        'Autoplay Updated',
+        enabled
+            ? 'Autoplay enabled. When the queue ends, related tracks will play automatically.'
+            : 'Autoplay disabled. Playback will stop when the queue ends.',
+    );
+}
 }
