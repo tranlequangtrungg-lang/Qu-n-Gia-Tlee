@@ -63,6 +63,21 @@ export async function getMatch(client, guildId, matchId) {
     return await client.db.get(matchKey(guildId, matchId)).catch(() => null);
 }
 
+/**
+ * Toàn bộ cược của 1 trận, từ mọi user — dùng cho /lichsucuoc all để tổng
+ * hợp ai thắng/thua trong 1 trận đã chốt, không giới hạn theo 1 người.
+ */
+export async function getAllBetsForMatch(client, guildId, matchId) {
+    const keys = await listKeys(client, betListPrefix(guildId, matchId));
+    const bets = [];
+    for (const key of keys) {
+        const userId = key.slice(betListPrefix(guildId, matchId).length);
+        const bet = await client.db.get(key).catch(() => null);
+        if (bet) bets.push({ userId, ...bet });
+    }
+    return bets;
+}
+
 export async function listOpenMatches(client, guildId) {
     const keys = await listKeys(client, matchListPrefix(guildId));
     const matches = [];
