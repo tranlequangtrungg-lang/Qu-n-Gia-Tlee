@@ -210,6 +210,11 @@ export default {
                 await replyMusicSuccess(interaction, embed);
                 break;
             }
+                            case 'autoplay': {
+                const embed = await setAutoplay(client, interaction, interaction.options.getBoolean('enabled'));
+                await replyMusicSuccess(interaction, embed);
+                break;
+            }
             case 'eq': {
                 const embed = await setEqPreset(client, interaction, interaction.options.getString('preset'));
                 await replyMusicSuccess(interaction, embed);
