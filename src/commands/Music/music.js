@@ -108,6 +108,14 @@ export default {
                     opt.setName('enabled').setDescription('Enable or disable 24/7 mode').setRequired(true),
                 ),
         )
+                .addSubcommand((sub) =>
+            sub
+                .setName('autoplay')
+                .setDescription('Toggle autoplay when the queue ends')
+                .addBooleanOption((opt) =>
+                    opt.setName('enabled').setDescription('Enable or disable autoplay').setRequired(true),
+                ),
+        )
         .addSubcommand((sub) =>
             sub
                 .setName('eq')
