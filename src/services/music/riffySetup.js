@@ -57,47 +57,6 @@ export function initializeMusic(client) {
     logger.info(`Music initialized with ${lavalinkConfig.nodes.length} Lavalink node(s).`);
 }
 
-export function initializeMusic(client) {
-    if (!lavalinkConfig.nodes?.length) {
-        logger.error('No Lavalink nodes configured. Add lavalink/nodes.json, set LAVALINK_NODES, or set LAVALINK_HOST in your environment.');
-        return;
-    }
-
-    client.riffy = new Riffy(client, lavalinkConfig.nodes, {
-        send: (payload) => {
-            const guild = client.guilds.cache.get(payload.d.guild_id);
-            if (guild) {
-                guild.shard.send(payload);
-            }
-        },
-        defaultSearchPlatform: lavalinkConfig.defaultSearchPlatform,
-        restVersion: lavalinkConfig.restVersion,
-        bypassChecks: {
-            nodeFetchInfo: true,
-        },
-    });
-
-    setupPlayerHandler(client);
-
-    client.on('raw', (packet) => {
-        if (
-            ![
-                GatewayDispatchEvents.VoiceStateUpdate,
-                GatewayDispatchEvents.VoiceServerUpdate,
-            ].includes(packet.t)
-        ) {
-            return;
-        }
-        client.riffy.updateVoiceState(packet);
-    });
-
-    client.riffy.on('playerError', (player, error) => {
-        logger.error(`Music player error in guild ${player.guildId}:`, error);
-    });
-
-    logger.info(`Music initialized with ${lavalinkConfig.nodes.length} Lavalink node(s).`);
-}
-
 export function initRiffyAfterReady(client) {
     if (client.riffy && client.user?.id) {
         client.riffy.init(client.user.id);
