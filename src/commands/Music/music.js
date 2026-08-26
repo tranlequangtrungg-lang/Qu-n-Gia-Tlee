@@ -1,6 +1,10 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import {
+    // ... giữ nguyên các import cũ
+    setAutoplay,
+} from '../../services/music/musicActions.js';
+import {
     skipTrack,
     stopPlayback,
     pausePlayback,
