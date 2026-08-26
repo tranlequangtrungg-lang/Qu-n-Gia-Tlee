@@ -135,6 +135,40 @@ export async function placeBet(client, guildId, userId, matchId, type, pick, amo
     });
 }
 
+/**
+ * Toàn bộ trận đấu (mọi trạng thái: open/closed/resolved) — khác
+ * listOpenMatches vốn chỉ lọc trận đang mở. Dùng cho lịch sử cược, vì
+ * người chơi cần thấy cả trận đã kết thúc.
+ */
+export async function listAllMatches(client, guildId) {
+    const keys = await listKeys(client, matchListPrefix(guildId));
+    const matches = [];
+    for (const key of keys) {
+        const data = await client.db.get(key).catch(() => null);
+        if (data) matches.push(data);
+    }
+    return matches.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
+ * Lịch sử cược của 1 user trong guild — quét toàn bộ trận, giữ lại những
+ * trận user có đặt cược, kèm luôn thông tin trận (tên đội, trạng thái) để
+ * hiển thị mà không cần query thêm lần nữa.
+ */
+export async function getUserBetHistory(client, guildId, userId) {
+    const matches = await listAllMatches(client, guildId);
+    const history = [];
+
+    for (const match of matches) {
+        const bet = await getUserBet(client, guildId, match.id, userId);
+        if (bet) {
+            history.push({ match, bet });
+        }
+    }
+
+    return history;
+}
+
 function determineOutcome(realScoreA, realScoreB) {
     if (realScoreA > realScoreB) return 'a';
     if (realScoreA < realScoreB) return 'b';
