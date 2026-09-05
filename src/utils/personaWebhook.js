@@ -1,45 +1,41 @@
 import { logger } from './logger.js';
 
-// Danh sách persona: tên hiển thị + avatar riêng cho từng "nhân vật" của bot.
-// Muốn đổi ảnh đại diện: chỉ cần thay avatarUrl bằng link ảnh thật, không cần
-// sửa gì khác. avatarUrl: null = tạm dùng avatar chính của bot.
-// Muốn thêm persona mới (vd "Thần Bài Tlee" cho casino): thêm 1 mục ở đây.
+// Mỗi persona = tên của 1 webhook riêng. Muốn đổi tên hiển thị hoặc avatar:
+// vào Discord → Server Settings → Integrations → Webhooks → chọn đúng
+// webhook có tên trùng persona bên dưới → sửa trực tiếp ở đó, KHÔNG cần
+// đụng code hay nhờ ai sửa giúp.
+//
+// Muốn thêm persona mới (vd "Thần Bài Tlee" cho casino): chỉ cần thêm 1
+// dòng vào object bên dưới, bot sẽ tự tạo webhook tương ứng ở lần gửi đầu
+// tiên (dùng tạm avatar của bot, sau đó bạn tự đổi ảnh trong Discord).
 export const PERSONAS = {
-    thu_ky: {
-        name: 'Thư Ký Tlee',
-        avatarUrl: null,
-    },
+    thu_ky: 'Thư Ký Tlee',
 };
 
-const WEBHOOK_NAME = 'TitanBot Persona Hook';
-const webhookCache = new Map(); // channelId (hoặc parent nếu là thread) -> Webhook
+const webhookCache = new Map(); // `${channelId}:${personaName}` -> Webhook
 
-function resolvePersonaAvatar(client, persona) {
-    return persona.avatarUrl || client.user.displayAvatarURL({ extension: 'png', size: 256 });
-}
-
-async function getOrCreateWebhook(channel) {
+async function getOrCreatePersonaWebhook(channel, personaName) {
     const isThread = typeof channel.isThread === 'function' && channel.isThread();
     const targetChannel = isThread ? channel.parent : channel;
     if (!targetChannel) return null;
 
-    const cacheKey = targetChannel.id;
+    const cacheKey = `${targetChannel.id}:${personaName}`;
     if (webhookCache.has(cacheKey)) {
         return webhookCache.get(cacheKey);
     }
 
     const existingHooks = await targetChannel.fetchWebhooks().catch(() => null);
-    let webhook = existingHooks?.find((w) => w.name === WEBHOOK_NAME && w.owner?.id === channel.client.user.id);
+    let webhook = existingHooks?.find((w) => w.name === personaName && w.owner?.id === channel.client.user.id);
 
     if (!webhook) {
         webhook = await targetChannel
             .createWebhook({
-                name: WEBHOOK_NAME,
+                name: personaName,
                 avatar: channel.client.user.displayAvatarURL({ extension: 'png' }),
-                reason: 'Tạo webhook để bot gửi tin nhắn với nhiều persona khác nhau',
+                reason: `Tạo webhook persona "${personaName}"`,
             })
             .catch((error) => {
-                logger.warn(`[PERSONA] Không tạo được webhook ở kênh ${targetChannel.id}:`, error.message);
+                logger.warn(`[PERSONA] Không tạo được webhook "${personaName}" ở kênh ${targetChannel.id}:`, error.message);
                 return null;
             });
     }
@@ -52,21 +48,21 @@ async function getOrCreateWebhook(channel) {
 }
 
 /**
- * Gửi 1 tin nhắn vào `channel` nhưng hiển thị tên + avatar theo persona
- * (vd "Thư Ký Tlee") thay vì tên bot thật.
+ * Gửi 1 tin nhắn vào `channel` bằng webhook riêng của persona đó — tên và
+ * avatar hiển thị chính là tên/avatar của webhook (chỉnh trực tiếp trong
+ * Discord, không cần code).
  *
- * Tự động tạo/dùng lại 1 webhook chung cho kênh đó — không tạo webhook mới
- * mỗi lần gửi. Nếu không tạo/dùng được webhook (vd thiếu quyền Manage
- * Webhooks ở kênh này), tự fallback về channel.send() bình thường — tính
- * năng chính (/tlee) vẫn chạy, chỉ là hiện tên bot gốc thay vì persona.
+ * Nếu không tạo/dùng được webhook (vd thiếu quyền Manage Webhooks ở kênh
+ * này), tự fallback về channel.send() bình thường — tính năng chính vẫn
+ * chạy, chỉ là hiện tên bot gốc.
  */
 export async function sendAsPersona(channel, personaKey, payload) {
-    const persona = PERSONAS[personaKey];
-    if (!persona) {
+    const personaName = PERSONAS[personaKey];
+    if (!personaName) {
         throw new Error(`Không tìm thấy persona "${personaKey}"`);
     }
 
-    const webhook = await getOrCreateWebhook(channel);
+    const webhook = await getOrCreatePersonaWebhook(channel, personaName);
     if (!webhook) {
         return channel.send(payload);
     }
@@ -76,8 +72,6 @@ export async function sendAsPersona(channel, personaKey, payload) {
     try {
         return await webhook.send({
             ...payload,
-            username: persona.name,
-            avatarURL: resolvePersonaAvatar(channel.client, persona),
             threadId: isThread ? channel.id : undefined,
         });
     } catch (error) {
