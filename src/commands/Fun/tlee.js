@@ -14,6 +14,7 @@ import {
     PermissionFlagsBits,
 } from 'discord.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { sendAsPersona } from '../../utils/personaWebhook.js';
 import {
     addExpression,
     removeExpression,
@@ -224,7 +225,7 @@ export default {
 
                 if (i.customId === SEND_BUTTON_ID) {
                     const caption = buildCaption(activeExpression, interaction.user.id, selectedTargets);
-                    await interaction.channel.send({
+                    await sendAsPersona(interaction.channel, 'thu_ky', {
                         content: caption,
                         files: [{ attachment: activeImageUrl, name: `${activeExpression.name}.gif` }],
                     });
