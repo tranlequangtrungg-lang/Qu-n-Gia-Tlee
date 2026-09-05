@@ -1,3 +1,8 @@
+// GHI ĐÈ → src/commands/Fun/tlee.js
+// Toàn bộ giống bản cũ, CHỈ đổi đúng 1 chỗ trong SEND_BUTTON_ID (xem comment
+// "<-- ĐỔI Ở ĐÂY" bên dưới): gọi sendAsPersona với chữ ký mới
+// (client, channel, guildId, actionKey, payload) thay vì (channel, 'thu_ky', payload).
+
 import {
     SlashCommandBuilder,
     EmbedBuilder,
@@ -225,7 +230,11 @@ export default {
 
                 if (i.customId === SEND_BUTTON_ID) {
                     const caption = buildCaption(activeExpression, interaction.user.id, selectedTargets);
-                    await sendAsPersona(interaction.channel, 'thu_ky', {
+                    // <-- ĐỔI Ở ĐÂY: chữ ký mới cần thêm client + guildId,
+                    // và 'thu_ky' đổi thành actionKey 'tlee_tag' (khai báo
+                    // trong config/personaActions.js). Persona thật sự đứng
+                    // tên sẽ do /tleeoi quyết định, không hardcode nữa.
+                    await sendAsPersona(client, interaction.channel, interaction.guildId, 'tlee_tag', {
                         content: caption,
                         files: [{ attachment: activeImageUrl, name: `${activeExpression.name}.gif` }],
                     });
