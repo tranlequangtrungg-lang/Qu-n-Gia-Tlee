@@ -1,41 +1,45 @@
-import { logger } from './logger.js';
-
-// Mỗi persona = tên của 1 webhook riêng. Muốn đổi tên hiển thị hoặc avatar:
-// vào Discord → Server Settings → Integrations → Webhooks → chọn đúng
-// webhook có tên trùng persona bên dưới → sửa trực tiếp ở đó, KHÔNG cần
-// đụng code hay nhờ ai sửa giúp.
+// GHI ĐÈ (thay thế toàn bộ) → src/utils/personaWebhook.js
 //
-// Muốn thêm persona mới (vd "Thần Bài Tlee" cho casino): chỉ cần thêm 1
-// dòng vào object bên dưới, bot sẽ tự tạo webhook tương ứng ở lần gửi đầu
-// tiên (dùng tạm avatar của bot, sau đó bạn tự đổi ảnh trong Discord).
-export const PERSONAS = {
-    thu_ky: 'Thư Ký Tlee',
-};
+// Khác bản cũ: persona không còn hardcode trong object PERSONAS nữa, mà đọc
+// từ personaService (quản lý qua /tleeoi trong Discord). Thêm bước kiểm tra
+// quyền phòng (rooms / freeRoam) trước khi gửi — nếu bị chặn thì fallback
+// gửi bằng bot gốc + báo admin (DM từng admin + kênh log cố định).
 
-const webhookCache = new Map(); // `${channelId}:${personaName}` -> Webhook
+import { logger } from './logger.js';
+import { getPersona, getAssignedPersonaKey } from '../services/personaService.js';
 
-async function getOrCreatePersonaWebhook(channel, personaName) {
+const ADMIN_LOG_CHANNEL_ID = '1310661747882856538';
+
+const webhookCache = new Map(); // `${channelId}:${personaKey}` -> Webhook
+
+async function getOrCreatePersonaWebhook(channel, persona) {
     const isThread = typeof channel.isThread === 'function' && channel.isThread();
     const targetChannel = isThread ? channel.parent : channel;
     if (!targetChannel) return null;
 
-    const cacheKey = `${targetChannel.id}:${personaName}`;
+    const cacheKey = `${targetChannel.id}:${persona.key}`;
     if (webhookCache.has(cacheKey)) {
         return webhookCache.get(cacheKey);
     }
 
     const existingHooks = await targetChannel.fetchWebhooks().catch(() => null);
-    let webhook = existingHooks?.find((w) => w.name === personaName && w.owner?.id === channel.client.user.id);
+    let webhook = existingHooks?.find((w) => w.name === persona.name && w.owner?.id === channel.client.user.id);
 
     if (!webhook) {
+        // Lưu ý: avatarUrl lấy từ link đính kèm lúc tạo persona — link CDN
+        // đính kèm Discord có hạn dùng, nhưng vì createWebhook tải ảnh về
+        // ngay lúc này và lưu thành asset riêng của webhook, nên webhook đã
+        // tạo xong sẽ KHÔNG bị ảnh hưởng nếu link gốc hết hạn sau đó. Chỉ
+        // rủi ro nếu webhook bị xoá thủ công và phải tạo lại sau khi link
+        // avatarUrl gốc đã hết hạn — lúc đó sẽ tạo lại bằng avatar bot gốc.
         webhook = await targetChannel
             .createWebhook({
-                name: personaName,
-                avatar: channel.client.user.displayAvatarURL({ extension: 'png' }),
-                reason: `Tạo webhook persona "${personaName}"`,
+                name: persona.name,
+                avatar: persona.avatarUrl || channel.client.user.displayAvatarURL({ extension: 'png' }),
+                reason: `Tạo webhook tính cách "${persona.name}"`,
             })
             .catch((error) => {
-                logger.warn(`[PERSONA] Không tạo được webhook "${personaName}" ở kênh ${targetChannel.id}:`, error.message);
+                logger.warn(`[PERSONA] Không tạo được webhook "${persona.name}" ở kênh ${targetChannel.id}:`, error.message);
                 return null;
             });
     }
@@ -43,32 +47,77 @@ async function getOrCreatePersonaWebhook(channel, personaName) {
     if (webhook) {
         webhookCache.set(cacheKey, webhook);
     }
-
     return webhook;
 }
 
-/**
- * Gửi 1 tin nhắn vào `channel` bằng webhook riêng của persona đó — tên và
- * avatar hiển thị chính là tên/avatar của webhook (chỉnh trực tiếp trong
- * Discord, không cần code).
- *
- * Nếu không tạo/dùng được webhook (vd thiếu quyền Manage Webhooks ở kênh
- * này), tự fallback về channel.send() bình thường — tính năng chính vẫn
- * chạy, chỉ là hiện tên bot gốc.
- */
-export async function sendAsPersona(channel, personaKey, payload) {
-    const personaName = PERSONAS[personaKey];
-    if (!personaName) {
-        throw new Error(`Không tìm thấy persona "${personaKey}"`);
+async function notifyAdmins(guild, content) {
+    try {
+        const logChannel = guild.channels.cache.get(ADMIN_LOG_CHANNEL_ID)
+            || (await guild.channels.fetch(ADMIN_LOG_CHANNEL_ID).catch(() => null));
+        if (logChannel) {
+            await logChannel.send({ content }).catch((error) => {
+                logger.warn('[PERSONA] Không gửi được log admin:', error.message);
+            });
+        }
+    } catch (error) {
+        logger.warn('[PERSONA] Lỗi khi gửi log admin:', error.message);
     }
 
-    const webhook = await getOrCreatePersonaWebhook(channel, personaName);
+    try {
+        const members = await guild.members.fetch();
+        const admins = members.filter((m) => m.permissions.has('Administrator') && !m.user.bot);
+        for (const member of admins.values()) {
+            await member.send({ content }).catch(() => {});
+        }
+    } catch (error) {
+        logger.warn('[PERSONA] Không DM được admin:', error.message);
+    }
+}
+
+/**
+ * Gửi tin nhắn vào `channel` bằng tính cách đang được gán cho `actionKey`
+ * (gán/đổi qua /tleeoi, không cần sửa code). Nếu tính cách đó chưa được
+ * admin cấp quyền ở kênh này (không nằm trong danh sách phòng và không bật
+ * "tự do đi lại") → fallback gửi bằng bot gốc + báo admin.
+ *
+ * @param client   discord.js Client (cần client.db)
+ * @param channel  kênh (hoặc thread) sẽ gửi tin vào
+ * @param guildId  ID server, vì persona lưu theo từng server riêng
+ * @param actionKey  khoá hành động khai báo trong config/personaActions.js
+ * @param payload  nội dung gửi (content, embeds, files...)
+ */
+export async function sendAsPersona(client, channel, guildId, actionKey, payload) {
+    const personaKeyValue = await getAssignedPersonaKey(client, guildId, actionKey);
+    if (!personaKeyValue) {
+        // Chưa có ai gán tính cách cho hành động này -> gửi bằng bot gốc,
+        // không tính là lỗi (admin có thể cố ý chưa gán).
+        return channel.send(payload);
+    }
+
+    const persona = await getPersona(client, guildId, personaKeyValue);
+    if (!persona) {
+        return channel.send(payload);
+    }
+
+    const allowed = persona.freeRoam || persona.rooms.includes(channel.id);
+    if (!allowed) {
+        await notifyAdmins(
+            channel.guild,
+            `⚠️ Tính cách **${persona.name}** chưa được cấp quyền ở kênh <#${channel.id}> (hành động: \`${actionKey}\`). Bot đã gửi bằng tên gốc thay thế. Dùng \`/tleelist\` để cấp quyền phòng.`,
+        );
+        return channel.send(payload);
+    }
+
+    const webhook = await getOrCreatePersonaWebhook(channel, persona);
     if (!webhook) {
+        await notifyAdmins(
+            channel.guild,
+            `⚠️ Không tạo được webhook cho tính cách **${persona.name}** ở kênh <#${channel.id}> (có thể thiếu quyền Manage Webhooks). Bot đã gửi bằng tên gốc thay thế.`,
+        );
         return channel.send(payload);
     }
 
     const isThread = typeof channel.isThread === 'function' && channel.isThread();
-
     try {
         return await webhook.send({
             ...payload,
@@ -76,6 +125,7 @@ export async function sendAsPersona(channel, personaKey, payload) {
         });
     } catch (error) {
         logger.warn('[PERSONA] Gửi qua webhook thất bại, fallback gửi thường:', error.message);
+        await notifyAdmins(channel.guild, `⚠️ Gửi webhook cho tính cách **${persona.name}** thất bại (${error.message}). Bot đã gửi bằng tên gốc thay thế.`);
         return channel.send(payload);
     }
 }
