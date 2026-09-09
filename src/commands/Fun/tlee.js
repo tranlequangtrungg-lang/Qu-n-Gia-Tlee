@@ -20,14 +20,7 @@ import {
 } from 'discord.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import { sendAsPersona } from '../../utils/personaWebhook.js';
-import {
-    addExpression,
-    removeExpression,
-    listExpressions,
-    getExpression,
-    getFreshAttachmentUrl,
-    buildCaption,
-} from '../../services/bieuCamService.js';
+import { listExpressions, getExpression, getFreshAttachmentUrl, buildCaption, userOwnsExpression } from '../../services/bieuCamService.js';
 
 const ADD_BUTTON_ID = 'tlee_admin_add';
 const REMOVE_BUTTON_ID = 'tlee_admin_remove';
