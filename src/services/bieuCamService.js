@@ -32,6 +32,13 @@ async function listKeys(client, prefix) {
     return keys.filter((k) => k.startsWith(prefix));
 }
 
+// Dùng cho nhãn nút bấm / mô tả dropdown — 2 nơi Discord KHÔNG render được
+// emoji tuỳ chỉnh dạng <:Bcoin:id>, chỉ hiện được chữ thường. Khác
+// formatCurrency() (có emoji, dùng được trong embed/content bình thường).
+export function formatCurrencyPlain(amount) {
+    return `${amount.toLocaleString('vi-VN')} Bcoin`;
+}
+
 export async function getDefaultPrice(client, guildId) {
     const cfg = await client.db.get(configKey(guildId)).catch(() => null);
     return cfg?.defaultPrice ?? DEFAULT_PRICE_FALLBACK;
