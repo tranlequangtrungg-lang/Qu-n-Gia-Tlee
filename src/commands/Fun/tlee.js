@@ -116,16 +116,32 @@ function buildRemovePanel(expressions) {
         .setColor('#e74c3c')
         .setDescription('Chọn biểu cảm muốn xoá.');
 
-    const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId(REMOVE_PICK_SELECT_ID)
-        .setPlaceholder('Chọn biểu cảm cần xoá...')
-        .addOptions(
-            expressions.slice(0, 25).map((e) => ({
-                label: e.name,
-                description: (e.description || '').slice(0, 100) || undefined,
-                value: e.name,
-            })),
-        );
+        // Lọc: chỉ hiện biểu cảm miễn phí hoặc đã mua — biểu cảm trả phí
+        // chưa mua sẽ được lọc bỏ khỏi danh sách, tránh chọn nhầm rồi báo
+        // lỗi; hướng người dùng qua /cuahangtlee để mua trước.
+        const usableExpressions = [];
+        for (const e of expressions) {
+            const owned = await userOwnsExpression(client, interaction.guildId, interaction.user.id, e);
+            if (owned) usableExpressions.push(e);
+        }
+
+        if (usableExpressions.length === 0) {
+            await InteractionHelper.safeEditReply(interaction, {
+                content: 'Bạn chưa sở hữu biểu cảm nào cả. Dùng `/cuahangtlee` để xem và mua nhé!',
+            });
+            return;
+        }
+
+        const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('tlee_pick')
+            .setPlaceholder('Chọn 1 biểu cảm...')
+            .addOptions(
+                usableExpressions.slice(0, 25).map((e) => ({
+                    label: e.name,
+                    description: e.description.slice(0, 100),
+                    value: e.name,
+                })),
+            );
 
     return {
         embeds: [embed],
