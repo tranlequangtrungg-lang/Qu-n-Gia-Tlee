@@ -1,7 +1,24 @@
+// GHI ĐÈ → src/utils/casinoTable.js
+//
+// Khác bản cũ: KHÔNG còn dùng interaction.editReply()/message.edit() trực
+// tiếp để hiện hoạt ảnh nữa (vì cách đó luôn hiện dưới tên bot thật, không
+// đổi tên/avatar được). Toàn bộ khung hình (mở bàn -> đóng cược -> lắc bát
+// -> mở bát -> kết quả) giờ đi qua sendPersonaFrame()/editPersonaFrame(),
+// nên bàn Tài Xỉu chung sẽ tự động đứng tên persona đang được gán cho hành
+// động "taixiu_ketqua" (gán qua /tleeoi), y hệt như /tx và /xd.
+//
+// openTable() không còn nhận tham số `interaction` nữa — nơi gọi (lệnh
+// /txs) tự lo việc xoá tin nhắn "đang xử lý" tạm thời TRƯỚC khi gọi hàm
+// này; openTable() chỉ cần biết `channel` để gửi tin nhắn persona mới.
+//
+// `frameHandles` (Map channelId -> handle) chỉ tồn tại trong bộ nhớ, y hệt
+// `timers` sẵn có — nếu bot restart giữa lúc có bàn đang mở, hoạt ảnh không
+// tự nối lại được (giống hệt hạn chế đã có từ trước với `timers`), nhưng
+// tiền vẫn được hoàn lại đầy đủ nhờ recoverStaleTables() như cũ.
+
 import { AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { createEmbed } from './embeds.js';
 import { logger } from './logger.js';
-import { InteractionHelper } from './interactionHelper.js';
 import {
     getEconomyData,
     setEconomyData,
@@ -13,9 +30,11 @@ import {
 import { getJackpot, addToJackpot, rollJackpotExplosion, getJackpotRakeAmount } from './casinoJackpot.js';
 import { renderTaiXiuFrame } from './casinoRender.js';
 import { getBotOwners } from '../config/bot.js';
+import { sendPersonaFrame, editPersonaFrame } from './personaWebhook.js';
 
 export const MIN_BET = 10;
 export const MAX_BET = 1000000;
+const PERSONA_ACTION_KEY = 'taixiu_ketqua';
 
 const OPEN_DURATION_MS = 27 * 1000;
 const TOTAL_DURATION_MS = 30 * 1000;
@@ -23,19 +42,12 @@ const SHAKE_FRAMES = 2;
 const SHAKE_DELAY_MS = 600;
 const DIE_REVEAL_DELAY_MS = 2000;
 const TAI_XIU_RETURN_MULTIPLIER = 2;
-const MESSAGE_EDIT_TIMEOUT_MS = 6000;
 
 const timers = new Map();
+const frameHandles = new Map(); // channelId -> frame handle (chỉ tồn tại trong bộ nhớ, giống `timers`)
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function withTimeout(promise, ms, label) {
-    return Promise.race([
-        promise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout: ${label} quá ${ms}ms`)), ms))
-    ]);
 }
 
 function shuffle(array) {
@@ -94,19 +106,36 @@ export async function getActiveTable(client, channelId) {
     return await getTableRaw(client, channelId);
 }
 
-// Sửa tin nhắn có giới hạn thời gian chờ — treo/lỗi mạng thì bỏ qua (chỉ ghi log), KHÔNG chặn phần trả tiền phía sau.
-async function editMessageWithFrame(message, frame, filename, embedDescription, components = []) {
-    try {
-        const attachment = new AttachmentBuilder(frame, { name: filename });
-        const embed = createEmbed({ color: 'primary', description: embedDescription }).setImage(`attachment://${filename}`);
-        await withTimeout(
-            message.edit({ embeds: [embed], files: [attachment], components }),
-            MESSAGE_EDIT_TIMEOUT_MS,
-            'message.edit'
-        );
-    } catch (error) {
-        logger.error('[CASINO_TABLE] editMessageWithFrame failed/timeout — bỏ qua, không chặn tiếp theo', { error: error.message });
+function buildBetRow(channelId, disabled = false) {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`taixiu_bet:tai:${channelId}`).setLabel('TÀI').setStyle(ButtonStyle.Danger).setDisabled(disabled),
+        new ButtonBuilder().setCustomId(`taixiu_bet:xiu:${channelId}`).setLabel('XỈU').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+    );
+}
+
+function buildFramePayload(frame, filename, embedDescription, components = []) {
+    const attachment = new AttachmentBuilder(frame, { name: filename });
+    const embed = createEmbed({ color: 'primary', description: embedDescription }).setImage(`attachment://${filename}`);
+    return { embeds: [embed], files: [attachment], components };
+}
+
+// Gửi khung ĐẦU TIÊN của bàn (mở bàn mới) — lưu lại frame handle để dùng cho các lần sửa sau.
+async function sendTableFrame(client, channel, guildId, frame, filename, embedDescription, components = []) {
+    const payload = buildFramePayload(frame, filename, embedDescription, components);
+    const handle = await sendPersonaFrame(client, channel, guildId, PERSONA_ACTION_KEY, payload);
+    frameHandles.set(channel.id, handle);
+    return handle;
+}
+
+// Sửa khung hiện có của bàn — có giới hạn thời gian chờ, treo/lỗi thì bỏ qua (chỉ ghi log), KHÔNG chặn phần trả tiền phía sau.
+async function updateTableFrame(channelId, frame, filename, embedDescription, components = []) {
+    const handle = frameHandles.get(channelId);
+    if (!handle) {
+        logger.warn(`[CASINO_TABLE] Không tìm thấy khung hiển thị đang hoạt động cho kênh ${channelId} — bỏ qua cập nhật hình ảnh (tiền vẫn xử lý bình thường).`);
+        return false;
     }
+    const payload = buildFramePayload(frame, filename, embedDescription, components);
+    return await editPersonaFrame(handle, payload);
 }
 
 export async function placeBet(client, guildId, channelId, user, side, amount) {
@@ -188,10 +217,6 @@ function scheduleTimers(client, table) {
 async function refreshWaitingFrame(client, channelId) {
     const table = await getTableRaw(client, channelId);
     if (!table || table.status !== 'open') return;
-    const channel = await client.channels.fetch(channelId).catch(() => null);
-    if (!channel) return;
-    const message = await channel.messages.fetch(table.messageId).catch(() => null);
-    if (!message) return;
 
     const jackpotAmount = await getJackpot(client, table.guildId, 'taixiu');
     const closesAtUnix = Math.floor(table.closesAt / 1000);
@@ -200,10 +225,10 @@ async function refreshWaitingFrame(client, channelId) {
         jackpotAmount,
         participants: Object.values(table.participants),
     });
-    await editMessageWithFrame(
-        message, frame, 'taixiu.png',
+    await updateTableFrame(
+        channelId, frame, 'taixiu.png',
         `⏳ Đóng cược <t:${closesAtUnix}:R>`,
-        message.components
+        [buildBetRow(channelId, false)],
     );
 }
 
@@ -213,11 +238,6 @@ async function closeBetting(client, channelId) {
     table.status = 'closed';
     await setTableRaw(client, channelId, table);
 
-    const channel = await client.channels.fetch(channelId).catch(() => null);
-    if (!channel) return;
-    const message = await channel.messages.fetch(table.messageId).catch(() => null);
-    if (!message) return;
-
     const jackpotAmount = await getJackpot(client, table.guildId, 'taixiu');
     const frame = await renderTaiXiuFrame({
         phase: 'waiting',
@@ -226,11 +246,7 @@ async function closeBetting(client, channelId) {
         participants: Object.values(table.participants),
     });
 
-    const disabledRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`taixiu_bet:tai:${channelId}`).setLabel('TÀI').setStyle(ButtonStyle.Danger).setDisabled(true),
-        new ButtonBuilder().setCustomId(`taixiu_bet:xiu:${channelId}`).setLabel('XỈU').setStyle(ButtonStyle.Primary).setDisabled(true),
-    );
-    await editMessageWithFrame(message, frame, 'taixiu.png', '🔒 Đã đóng cược', [disabledRow]);
+    await updateTableFrame(channelId, frame, 'taixiu.png', '🔒 Đã đóng cược', [buildBetRow(channelId, true)]);
 }
 
 export async function resolveTable(client, channelId) {
@@ -240,9 +256,9 @@ export async function resolveTable(client, channelId) {
     const channel = await client.channels.fetch(channelId).catch(() => null);
     if (!channel) {
         await deleteTableRaw(client, channelId);
+        frameHandles.delete(channelId);
         return;
     }
-    const message = await channel.messages.fetch(table.messageId).catch(() => null);
 
     const participantEntries = Object.entries(table.participants || {});
 
@@ -254,7 +270,7 @@ export async function resolveTable(client, channelId) {
             jackpotAmount: await getJackpot(client, table.guildId, 'taixiu'),
             participants: participantEntries.map(([, p]) => p),
         });
-        if (message) await editMessageWithFrame(message, frame, 'taixiu.png', '🎲 Đang lắc bát...');
+        await updateTableFrame(channelId, frame, 'taixiu.png', '🎲 Đang lắc bát...');
         await sleep(SHAKE_DELAY_MS);
     }
 
@@ -270,7 +286,7 @@ export async function resolveTable(client, channelId) {
             jackpotAmount: await getJackpot(client, table.guildId, 'taixiu'),
             participants: participantEntries.map(([, p]) => p),
         });
-        if (message) await editMessageWithFrame(message, frame, 'taixiu.png', '🥣 Đang mở bát...');
+        await updateTableFrame(channelId, frame, 'taixiu.png', '🥣 Đang mở bát...');
         await sleep(DIE_REVEAL_DELAY_MS);
     }
 
@@ -320,7 +336,23 @@ export async function resolveTable(client, channelId) {
         resultInfo: { total: result.total, outcome: result.outcome },
         participants: resultsList,
     });
-    if (message) await editMessageWithFrame(message, finalFrame, 'taixiu.png', '✅ Đã trả kết quả');
+    const finalOk = await updateTableFrame(channelId, finalFrame, 'taixiu.png', '✅ Đã trả kết quả');
+
+    // Lưới an toàn: nếu khung kết quả không hiện lên được, DM riêng từng
+    // người chơi kết quả của họ để không ai "mất tích" tiền/kết quả.
+    if (!finalOk && resultsList.length > 0) {
+        for (const r of resultsList) {
+            const line = r.won
+                ? `🎉 Bạn thắng ván Tài Xỉu chung ở kênh <#${channelId}>! Kết quả: **${result.dice.join(' - ')}** (tổng ${result.total}). Nhận về **${formatCurrency(r.netWinnings)}** lời.`
+                : `😢 Bạn thua ván Tài Xỉu chung ở kênh <#${channelId}>. Kết quả: **${result.dice.join(' - ')}** (tổng ${result.total}).`;
+            try {
+                const user = await client.users.fetch(r.userId);
+                await user.send(`⚠️ Hình ảnh kết quả gặp trục trặc khi hiển thị, nhưng ván chơi đã được tính:\n${line}`);
+            } catch (error) {
+                logger.warn('[CASINO_TABLE] Không DM được kết quả dự phòng cho người chơi', { userId: r.userId, error: error.message });
+            }
+        }
+    }
 
     if (jackpotSplits.length > 0) {
         const lines = jackpotSplits.map(s => `<@${s.userId}> nhận **${s.share.toLocaleString()} Bcoin**`).join('\n');
@@ -333,13 +365,14 @@ export async function resolveTable(client, channelId) {
 
     await deleteTableRaw(client, channelId);
     timers.delete(channelId);
+    frameHandles.delete(channelId);
 
     if (participantEntries.length > 0) {
         await openTable(client, channel);
     }
 }
 
-export async function openTable(client, channel, interaction = null) {
+export async function openTable(client, channel) {
     const channelId = channel.id;
     const guildId = channel.guildId;
 
@@ -360,26 +393,17 @@ export async function openTable(client, channel, interaction = null) {
         participants: [],
     });
 
-    const attachment = new AttachmentBuilder(frame, { name: 'taixiu.png' });
-    const embed = createEmbed({ color: 'primary', description: `⏳ Đóng cược <t:${closesAtUnix}:R>` }).setImage('attachment://taixiu.png');
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`taixiu_bet:tai:${channelId}`).setLabel('TÀI').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(`taixiu_bet:xiu:${channelId}`).setLabel('XỈU').setStyle(ButtonStyle.Primary),
+    const handle = await sendTableFrame(
+        client, channel, guildId, frame, 'taixiu.png',
+        `⏳ Đóng cược <t:${closesAtUnix}:R>`,
+        [buildBetRow(channelId, false)],
     );
-
-    let message;
-    if (interaction) {
-        await InteractionHelper.safeEditReply(interaction, { embeds: [embed], files: [attachment], components: [row] });
-        message = await interaction.fetchReply();
-    } else {
-        message = await channel.send({ embeds: [embed], files: [attachment], components: [row] });
-    }
 
     const table = {
         gameType: 'taixiu',
         guildId,
         channelId,
-        messageId: message.id,
+        messageId: handle.message.id,
         status: 'open',
         openedAt: now,
         closesAt,
@@ -404,6 +428,8 @@ export async function recoverStaleTables(client) {
             if (!table) continue;
             const channelId = table.channelId;
             const entries = Object.entries(table.participants || {});
+
+            frameHandles.delete(channelId);
 
             if (table.status === 'closed') {
                 logger.warn(`[CASINO_TABLE] Bàn đã đóng cược dở dang, tự động mở bát: ${key}`);
