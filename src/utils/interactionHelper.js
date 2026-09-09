@@ -1,4 +1,9 @@
-// interactionHelper.js
+// GHI ĐÈ → src/utils/interactionHelper.js
+//
+// So với bản trước: GIỮ NGUYÊN 100% mọi hàm cũ, không đổi logic gì cả.
+// THÊM MỚI duy nhất 1 hàm: safeDeleteReply() — dùng để ẩn/xoá tin nhắn
+// "đang xử lý" tạm thời của interaction sau khi đã defer, để nhường chỗ cho
+// tin nhắn persona thật (không làm crash nếu tin đã bị xoá/hết hạn sẵn).
 
 import { logger } from './logger.js';
 import { MessageFlags } from 'discord.js';
@@ -262,6 +267,31 @@ export class InteractionHelper {
                 return false;
             }
             logger.error('Failed to show modal:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Xoá tin nhắn phản hồi tạm thời (deferred reply) của interaction — dùng
+     * cho các lệnh chuyển sang hiện nội dung thật bằng tin nhắn persona
+     * riêng (không phải interaction.editReply nữa), vì interaction.editReply
+     * luôn hiện dưới tên bot thật, không đổi tên/avatar được.
+     *
+     * Không báo lỗi nếu tin đã bị xoá/hết hạn sẵn — chỉ ghi log debug.
+     */
+    static async safeDeleteReply(interaction) {
+        try {
+            const coordinator = this.getCoordinator(interaction);
+            if (coordinator?.isUsageFinalized()) {
+                return false;
+            }
+            if (!interaction.deferred && !interaction.replied) {
+                return false;
+            }
+            await interaction.deleteReply();
+            return true;
+        } catch (error) {
+            logger.debug(`Interaction ${interaction.id} không xoá được reply tạm (có thể đã xoá/hết hạn):`, error.message);
             return false;
         }
     }
