@@ -1,6 +1,9 @@
 import { logger } from '../utils/logger.js';
+import { getEconomyData, setEconomyData, withEconomyLock, formatCurrency } from '../utils/economy.js';
+import { checkTaiSanMoc } from './vinhDanhService.js';
 
 const STORAGE_CHANNEL_ID = '1545872460274999316';
+const DEFAULT_PRICE_FALLBACK = 36000;
 
 function expressionKey(guildId, name) {
     return `bieucam:${guildId}:${name.toLowerCase()}`;
@@ -8,6 +11,16 @@ function expressionKey(guildId, name) {
 
 function listPrefix(guildId) {
     return `bieucam:${guildId}:`;
+}
+
+function configKey(guildId) {
+    return `tlee_config:${guildId}`;
+}
+
+// Namespace riêng trong userData.upgrades — không bao giờ trùng với item id
+// thật trong config/shop/items.js.
+function ownershipKey(name) {
+    return `tlee_${name.toLowerCase()}`;
 }
 
 async function listKeys(client, prefix) {
@@ -19,7 +32,16 @@ async function listKeys(client, prefix) {
     return keys.filter((k) => k.startsWith(prefix));
 }
 
-export async function addExpression(client, guildId, { name, description, captionTemplate, addedBy, attachmentUrl }) {
+export async function getDefaultPrice(client, guildId) {
+    const cfg = await client.db.get(configKey(guildId)).catch(() => null);
+    return cfg?.defaultPrice ?? DEFAULT_PRICE_FALLBACK;
+}
+
+export async function setDefaultPrice(client, guildId, price) {
+    await client.db.set(configKey(guildId), { defaultPrice: price });
+}
+
+export async function addExpression(client, guildId, { name, description, captionTemplate, addedBy, attachmentUrl, price }) {
     const channel = client.channels.cache.get(STORAGE_CHANNEL_ID) || (await client.channels.fetch(STORAGE_CHANNEL_ID).catch(() => null));
     if (!channel) {
         throw new Error('Không tìm thấy kênh lưu trữ biểu cảm.');
@@ -40,10 +62,21 @@ export async function addExpression(client, guildId, { name, description, captio
         addedBy,
         createdAt: Date.now(),
         storageMessageId: storageMessage.id,
+        // null = dùng giá mặc định chung; số cụ thể (kể cả 0) = giá riêng.
+        price: price === undefined || price === null ? null : price,
     };
 
     await client.db.set(expressionKey(guildId, name), record);
     return record;
+}
+
+export async function setExpressionPrice(client, guildId, name, price) {
+    const key = expressionKey(guildId, name);
+    const existing = await client.db.get(key).catch(() => null);
+    if (!existing) return null;
+    existing.price = price === undefined || price === null ? null : price;
+    await client.db.set(key, existing);
+    return existing;
 }
 
 export async function removeExpression(client, guildId, name) {
@@ -69,6 +102,68 @@ export async function getExpression(client, guildId, name) {
 }
 
 /**
+ * Giá thực tế áp dụng — nếu biểu cảm không set giá riêng (null), dùng giá
+ * mặc định chung của guild.
+ */
+export async function getEffectivePrice(client, guildId, expression) {
+    if (expression.price !== null && expression.price !== undefined) {
+        return expression.price;
+    }
+    return await getDefaultPrice(client, guildId);
+}
+
+export function isFree(effectivePrice) {
+    return !effectivePrice || effectivePrice <= 0;
+}
+
+export async function userOwnsExpression(client, guildId, userId, expression) {
+    const effectivePrice = await getEffectivePrice(client, guildId, expression);
+    if (isFree(effectivePrice)) return true;
+
+    const userData = await getEconomyData(client, guildId, userId);
+    return Boolean(userData.upgrades?.[ownershipKey(expression.name)]);
+}
+
+/**
+ * Mua vĩnh viễn 1 biểu cảm — trừ Bcoin, ghi cờ sở hữu vào userData.upgrades
+ * (dùng chung định dạng với shop items thật, namespace riêng nên không đụng
+ * độ). Trả về { ok: false, reason } nếu thất bại.
+ */
+export async function purchaseExpression(client, guildId, userId, expression) {
+    return await withEconomyLock(guildId, userId, async () => {
+        const effectivePrice = await getEffectivePrice(client, guildId, expression);
+
+        if (isFree(effectivePrice)) {
+            return { ok: false, reason: 'already_free' };
+        }
+
+        const userData = await getEconomyData(client, guildId, userId);
+        const key = ownershipKey(expression.name);
+
+        if (userData.upgrades?.[key]) {
+            return { ok: false, reason: 'already_owned' };
+        }
+
+        if ((userData.wallet || 0) < effectivePrice) {
+            return { ok: false, reason: 'insufficient_funds', available: userData.wallet || 0, price: effectivePrice };
+        }
+
+        userData.wallet -= effectivePrice;
+        userData.upgrades = userData.upgrades || {};
+        userData.upgrades[key] = true;
+        await setEconomyData(client, guildId, userId, userData);
+
+        // Chạy nền, đồng bộ với mọi giao dịch Bcoin khác — tự thoát sớm nếu
+        // không có mốc Tài Sản mới nào bị ảnh hưởng (mua đồ chỉ giảm ví).
+        checkTaiSanMoc(client, guildId, userId, (userData.wallet || 0) + (userData.bank || 0)).catch((error) => {
+            logger.warn('[TLEE_SHOP] checkTaiSanMoc lỗi:', error.message);
+        });
+
+        return { ok: true, price: effectivePrice, newBalance: userData.wallet };
+    });
+}
+
+/**
  * Lấy lại link đính kèm còn tươi từ tin nhắn lưu trữ — không bao giờ dùng
  * link đã lưu sẵn trong DB vì link attachment Discord hết hạn theo thời
  * gian.
@@ -89,32 +184,22 @@ export async function getFreshAttachmentUrl(client, expression) {
     }
 }
 
-// Kho câu mặc định dùng khi admin không tự viết caption riêng cho biểu cảm.
-// Mỗi lần gửi, bốc ngẫu nhiên 1 câu — tránh lặp lại y hệt gây khô khan.
-// Hỗ trợ 3 placeholder: {nguoi_dung}, {muc_tieu}, {ten} (tên biểu cảm).
-const DEFAULT_CAPTION_TEMPLATES = [
-    'Tự nhiên {nguoi_dung} thấy {muc_tieu} phải nhận trọn vẹn cú {ten} này 😤',
-    '{nguoi_dung} chính thức ném combo {ten} thẳng mặt {muc_tieu} 😭',
-    'Không báo trước, {nguoi_dung} tặng {muc_tieu} một phát {ten} chất lượng cao 😏',
-    '{muc_tieu} vừa nhận nguyên xi cú {ten} từ {nguoi_dung}, đau chưa? 😂',
-    'Cảnh báo: {nguoi_dung} vừa {ten} {muc_tieu} không thương tiếc luôn 💀',
-    '{nguoi_dung} thả nguyên quả {ten} vào mặt {muc_tieu}, ai cứu nổi 🤡',
-];
-
 export function buildCaption(expression, invoker, targets) {
     const targetText = targets.length === 0
-        ? 'chính mình'
+        ? ''
         : targets.length === 1
             ? `<@${targets[0]}>`
             : `${targets.slice(0, -1).map((id) => `<@${id}>`).join(', ')} và <@${targets[targets.length - 1]}>`;
 
-    // Nếu admin đã tự viết caption riêng cho biểu cảm này thì luôn ưu tiên
-    // dùng đúng câu đó. Chỉ khi để trống mới bốc ngẫu nhiên từ kho mặc định.
-    const template = expression.captionTemplate
-        || DEFAULT_CAPTION_TEMPLATES[Math.floor(Math.random() * DEFAULT_CAPTION_TEMPLATES.length)];
+    if (expression.captionTemplate) {
+        return expression.captionTemplate
+            .replace(/\{nguoi_dung\}/g, `<@${invoker}>`)
+            .replace(/\{muc_tieu\}/g, targetText || 'chính mình');
+    }
 
-    return template
-        .replace(/\{nguoi_dung\}/g, `<@${invoker}>`)
-        .replace(/\{muc_tieu\}/g, targetText)
-        .replace(/\{ten\}/g, expression.name);
+    return targetText
+        ? `<@${invoker}> ${expression.name} ${targetText}!`
+        : `<@${invoker}> ${expression.name}!`;
 }
+
+export { formatCurrency };
